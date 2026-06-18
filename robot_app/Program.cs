@@ -134,19 +134,39 @@ namespace KebbiBrain
             log("====================================================");
         }
 
-        // G1《雙機接力闖關》Demo（指令序列 → 雙機地板接力，純 Sim）
+        // G1《雙機接力闖關》Demo（指令序列 → 雙機地板接力 + 避障，純 Sim）
+        // 演手冊命脈:同一張關卡,改指令 → 撞牆失敗 vs 繞行成功,「程式修改 → 物理結果改變」立即可見。
         private static async Task PlayG1DemoAsync()
         {
             Action<string> log = Console.WriteLine;
-            var bodyA = new SimKebbiBody(log, canMove: true);
-            var bodyB = new SimKebbiBody(log, canMove: true);
-            var bus = new SimRobotBus(log);
-            var game = new RelayQuestGame(bodyA, bus.CreateLink("Kebbi-A"), bodyB, bus.CreateLink("Kebbi-B"), log);
+            var map = LevelMap.Level1();
+            RelayQuestGame NewGame()
+            {
+                var bus = new SimRobotBus(log);
+                return new RelayQuestGame(new SimKebbiBody(log, true), bus.CreateLink("Kebbi-A"),
+                    new SimKebbiBody(log, true), bus.CreateLink("Kebbi-B"), log, map);
+            }
 
-            log("========== G1《雙機接力闖關》Demo（指令序列 → 雙機地板接力） ==========");
-            log("（程式：A 走 3 格＋轉彎 → 交棒 → B 走 2 格到終點）");
-            await game.RunProgramAsync(RelayQuestGame.MakeSampleProgram());
-            log("\n=== 走 " + game.Steps + " 格、抵達終點=" + game.ReachedGoal + " ===");
+            log("========== G1《雙機接力闖關》Demo（指令序列 → 雙機接力 + 避障） ==========");
+            log("關卡地圖（A 從 S 出發、面向右，要繞過 # 到 G）：");
+            log(map.Render(map.StartR, map.StartC, 'A'));
+
+            log("\n【第一回 ▶ 錯誤版：直直往前 FWD FWD FWD…】");
+            var g1 = NewGame();
+            await g1.RunProgramAsync(LevelMap.CrashProgram());
+            log("→ 結果：撞牆=" + g1.Crashed + "、抵達=" + g1.ReachedGoal + "（回去改積木！）");
+
+            log("\n【第二回 ▶ 修正版：右轉繞過障礙 + 交棒接力】");
+            var g2 = NewGame();
+            await g2.RunProgramAsync(LevelMap.DetourProgram());
+            log("→ 結果：走 " + g2.Steps + " 格、抵達=" + g2.ReachedGoal + " 🎉 修好了！沒撞牆、安全繞過、成功破關");
+
+            log("\n【第三回 ▶ 進階版：用條件積木 IF_OBSTACLE 讓程式自己偵測前方障礙就繞】");
+            var g3 = NewGame();
+            await g3.RunProgramAsync(LevelMap.SmartProgram());
+            log("→ 結果：抵達=" + g3.ReachedGoal + "（程式自動判斷避障，不用人工算路線）");
+
+            log("\n=== 重點：同一張關卡，改指令 → 撞牆失敗 vs 繞行成功，「程式修改 → 物理結果改變」即時回饋 ===");
             log("====================================================");
         }
 

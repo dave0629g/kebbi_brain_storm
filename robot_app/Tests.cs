@@ -35,6 +35,7 @@ namespace KebbiBrain
             T_G2_GeometryRelay();
             T_G5_Debate();
             T_G1_RelayQuest();
+            T_G1_Obstacle();
             T_Finale();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
@@ -603,6 +604,51 @@ namespace KebbiBrain
             var g2 = new App.RelayQuestGame(bodyA2, bus2.CreateLink("A2"), bodyB2, bus2.CreateLink("B2"), noop);
             g2.RunProgramAsync(new System.Collections.Generic.List<string> { "FWD", "GOAL" }).GetAwaiter().GetResult();
             Check("G1-未交棒就 GOAL → 不算抵達", !g2.ReachedGoal);
+        }
+
+        // G1 障礙/避障關卡:有地圖時 FWD 依朝向位移、撞 # 或出界=Crashed 闖關失敗;IF_OBSTACLE/IF_CLEAR 條件積木;可重入。
+        // 演手冊命脈「改指令→物理結果改變」:撞牆版失敗 vs 繞行版成功。純 Sim 可驗。
+        private static void T_G1_Obstacle()
+        {
+            Action<string> noop = _ => { };
+            RelayQuestGame NewGame()
+            {
+                var bus = new SimRobotBus(noop);
+                return new App.RelayQuestGame(new SimKebbiBody(noop, true), bus.CreateLink("A機"),
+                    new SimKebbiBody(noop, true), bus.CreateLink("B機"), noop, App.LevelMap.Level1());
+            }
+
+            // 撞牆版:直直走 → 第 2 格撞 # → Crashed、未抵達、撞牆前只走 1 格
+            var gCrash = NewGame();
+            gCrash.RunProgramAsync(App.LevelMap.CrashProgram()).GetAwaiter().GetResult();
+            Check("G1障礙-撞牆版:Crashed=true", gCrash.Crashed);
+            Check("G1障礙-撞牆版:未抵達終點", !gCrash.ReachedGoal);
+            Check("G1障礙-撞牆版:撞牆前只走 1 格", gCrash.Steps == 1);
+
+            // 繞行版(手動):右轉下繞→交棒→到 G → 抵達、沒撞、走 4 格
+            var gDetour = NewGame();
+            gDetour.RunProgramAsync(App.LevelMap.DetourProgram()).GetAwaiter().GetResult();
+            Check("G1障礙-繞行版:抵達終點", gDetour.ReachedGoal);
+            Check("G1障礙-繞行版:沒撞牆", !gDetour.Crashed);
+            Check("G1障礙-繞行版:走 4 格", gDetour.Steps == 4);
+
+            // 智慧版(條件積木 IF_OBSTACLE 自動偵測前方障礙就繞):抵達、沒撞
+            var gSmart = NewGame();
+            gSmart.RunProgramAsync(App.LevelMap.SmartProgram()).GetAwaiter().GetResult();
+            Check("G1障礙-智慧版(IF_OBSTACLE 自動繞):抵達終點且沒撞", gSmart.ReachedGoal && !gSmart.Crashed);
+
+            // 可重入:同一實例先撞牆版後繞行版 → 第二次抵達、Crashed 歸零、不跨場污染
+            var gReuse = NewGame();
+            gReuse.RunProgramAsync(App.LevelMap.CrashProgram()).GetAwaiter().GetResult();
+            gReuse.RunProgramAsync(App.LevelMap.DetourProgram()).GetAwaiter().GetResult();
+            Check("G1障礙-可重入:第二次繞行抵達、Crashed 歸零、走 4 格",
+                gReuse.ReachedGoal && !gReuse.Crashed && gReuse.Steps == 4);
+
+            // 條件積木 IF_CLEAR:正前方有障礙時應「跳過」區塊(對照 IF_OBSTACLE 會執行)
+            // 程式:FWD 到 (0,1)(前方是 #),IF_CLEAR FWD ENDIF → 前方有障礙 → 區塊被跳過 → 不前進、不撞牆、停 1 格
+            var gCond = NewGame();
+            gCond.RunProgramAsync(new System.Collections.Generic.List<string> { "FWD", "IF_CLEAR", "FWD", "ENDIF" }).GetAwaiter().GetResult();
+            Check("G1障礙-IF_CLEAR 前方有障礙時跳過區塊(不撞牆、停 1 格)", !gCond.Crashed && gCond.Steps == 1);
         }
 
         // 合體彩蛋編排:中控依序 cue 各站,站離線/卡住→降級跳過,壓軸全體同步。
