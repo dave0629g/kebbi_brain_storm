@@ -151,22 +151,23 @@ namespace KebbiBrain
             log("關卡地圖（A 從 S 出發、面向右，要繞過 # 到 G）：");
             log(map.Render(map.StartR, map.StartC, 'A'));
 
+            // 同一台「學生的機器人」連續嘗試,累計嘗試次數/撞牆次數 → 結算給效率星等。
+            var g = NewGame();
             log("\n【第一回 ▶ 錯誤版：直直往前 FWD FWD FWD…】");
-            var g1 = NewGame();
-            await g1.RunProgramAsync(LevelMap.CrashProgram());
-            log("→ 結果：撞牆=" + g1.Crashed + "、抵達=" + g1.ReachedGoal + "（回去改積木！）");
+            await g.RunProgramAsync(LevelMap.CrashProgram());
+            log("→ 結果：撞牆=" + g.Crashed + "、抵達=" + g.ReachedGoal + "（回去改積木！）");
 
             log("\n【第二回 ▶ 修正版：右轉繞過障礙 + 交棒接力】");
-            var g2 = NewGame();
-            await g2.RunProgramAsync(LevelMap.DetourProgram());
-            log("→ 結果：走 " + g2.Steps + " 格、抵達=" + g2.ReachedGoal + " 🎉 修好了！沒撞牆、安全繞過、成功破關");
+            await g.RunProgramAsync(LevelMap.DetourProgram());
+            log("→ 結果：走 " + g.Steps + " 格、抵達=" + g.ReachedGoal + " 🎉 修好了！沒撞牆、安全繞過、成功破關");
+            g.PrintSummary();
 
             log("\n【第三回 ▶ 進階版：用條件積木 IF_OBSTACLE 讓程式自己偵測前方障礙就繞】");
             var g3 = NewGame();
             await g3.RunProgramAsync(LevelMap.SmartProgram());
             log("→ 結果：抵達=" + g3.ReachedGoal + "（程式自動判斷避障，不用人工算路線）");
 
-            log("\n=== 重點：同一張關卡，改指令 → 撞牆失敗 vs 繞行成功，「程式修改 → 物理結果改變」即時回饋 ===");
+            log("\n=== 重點：改指令 → 撞牆失敗 vs 繞行成功（即時因果回饋）；結算累計嘗試/撞牆並給效率星等 ===");
             log("====================================================");
         }
 

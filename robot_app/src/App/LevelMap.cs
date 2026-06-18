@@ -32,6 +32,28 @@ namespace KebbiBrain.App
         public bool IsGoal(int r, int c) => r == GoalR && c == GoalC;
         public char At(int r, int c) => InBounds(r, c) ? _g[r][c] : '#';
 
+        // 起點→終點的最短步數(BFS,避開障礙;到不了回 -1)。用來給闖關效率評星等。
+        public int ShortestSteps()
+        {
+            var dist = new int[Rows, Cols];
+            for (int r = 0; r < Rows; r++) for (int c = 0; c < Cols; c++) dist[r, c] = -1;
+            int[] dr = { -1, 1, 0, 0 }, dc = { 0, 0, -1, 1 };
+            var q = new Queue<(int r, int c)>();
+            dist[StartR, StartC] = 0; q.Enqueue((StartR, StartC));
+            while (q.Count > 0)
+            {
+                var (r, c) = q.Dequeue();
+                if (r == GoalR && c == GoalC) return dist[r, c];
+                for (int k = 0; k < 4; k++)
+                {
+                    int nr = r + dr[k], nc = c + dc[k];
+                    if (InBounds(nr, nc) && !IsObstacle(nr, nc) && dist[nr, nc] < 0)
+                    { dist[nr, nc] = dist[r, c] + 1; q.Enqueue((nr, nc)); }
+                }
+            }
+            return -1;
+        }
+
         // 把目前機器人位置(who='A'/'B')疊到地圖上印成 ASCII。
         public string Render(int r, int c, char who)
         {

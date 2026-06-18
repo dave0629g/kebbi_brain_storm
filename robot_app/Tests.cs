@@ -38,6 +38,7 @@ namespace KebbiBrain
             T_G5_Score();
             T_G1_RelayQuest();
             T_G1_Obstacle();
+            T_G1_Score();
             T_Finale();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
@@ -716,6 +717,24 @@ namespace KebbiBrain
             var gCond = NewGame();
             gCond.RunProgramAsync(new System.Collections.Generic.List<string> { "FWD", "IF_CLEAR", "FWD", "ENDIF" }).GetAwaiter().GetResult();
             Check("G1障礙-IF_CLEAR 前方有障礙時跳過區塊(不撞牆、停 1 格)", !gCond.Crashed && gCond.Steps == 1);
+        }
+
+        // G1 闖關計分/星等:Attempts 累計嘗試、TotalCrashes 累計撞牆、Stars 效率星等(走越接近最短路徑越多星)、PrintSummary。
+        private static void T_G1_Score()
+        {
+            Action<string> noop = _ => { };
+            var map = App.LevelMap.Level1();
+            Check("G1計分-Level1 最短路徑=4(BFS)", map.ShortestSteps() == 4);
+
+            var bus = new SimRobotBus(noop);
+            var g = new App.RelayQuestGame(new SimKebbiBody(noop, true), bus.CreateLink("A機"),
+                new SimKebbiBody(noop, true), bus.CreateLink("B機"), noop, map);
+            g.RunProgramAsync(App.LevelMap.CrashProgram()).GetAwaiter().GetResult();   // 第1次:撞牆失敗
+            g.RunProgramAsync(App.LevelMap.DetourProgram()).GetAwaiter().GetResult();  // 第2次:繞行成功
+            Check("G1計分-累計嘗試 2 次", g.Attempts == 2);
+            Check("G1計分-累計撞牆 1 次(只第1次撞、不重複計)", g.TotalCrashes == 1);
+            Check("G1計分-第2次成功", g.ReachedGoal);
+            Check("G1計分-效率 3 星(走 4 格==最短路徑)", g.Stars == 3);
         }
 
         // 合體彩蛋編排:中控依序 cue 各站,站離線/卡住→降級跳過,壓軸全體同步。

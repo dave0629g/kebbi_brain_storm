@@ -25,10 +25,13 @@ namespace KebbiBrain.App
         private bool _bReady;
         private int _r, _c, _heading;            // 目前格位與朝向(有地圖時有效)
 
-        public int Steps { get; private set; }        // 走了幾格
+        public int Steps { get; private set; }        // 本次走了幾格
         public bool ReachedGoal { get; private set; }  // 是否由 B 抵達終點
         public bool OnRobotB { get; private set; }     // 目前是否輪到 B
-        public bool Crashed { get; private set; }      // 是否撞過障礙(有地圖時)
+        public bool Crashed { get; private set; }      // 本次是否撞過障礙(有地圖時)
+        public int Attempts { get; private set; }      // 累計嘗試次數(同一實例 RunProgram 幾次;不隨 Reset 歸零)
+        public int TotalCrashes { get; private set; }  // 累計撞牆次數(跨嘗試;每次嘗試最多 +1)
+        public int Stars { get; private set; }         // 本次效率星等(0~3:走越接近最短路徑越多星)
 
         public RelayQuestGame(IKebbiBody bodyA, IRobotLink linkA, IKebbiBody bodyB, IRobotLink linkB,
                               Action<string> log, LevelMap map = null)
@@ -37,16 +40,16 @@ namespace KebbiBrain.App
             _linkB.OnMessage((from, t) => { if (t == "GO") _bReady = true; });
         }
 
-        // 重置狀態(可重入:同一關卡可連跑多份程式;對齊 FinaleShowGame 慣例)。
+        // 重置「本次」狀態(可重入:同一關卡可連跑多份程式;Attempts/TotalCrashes 累計不歸零,供結算)。
         public void Reset()
         {
-            Steps = 0; ReachedGoal = false; OnRobotB = false; Crashed = false; _bReady = false;
+            Steps = 0; ReachedGoal = false; OnRobotB = false; Crashed = false; Stars = 0; _bReady = false;
             if (_map != null) { _r = _map.StartR; _c = _map.StartC; _heading = 1; } // 起點、面向東(+col)
         }
 
         public async Task RunProgramAsync(List<string> program)
         {
-            Reset();
+            Attempts++; Reset();
             IKebbiBody active = _bodyA;
             string activeName = _linkA.RobotId;
 
@@ -60,7 +63,7 @@ namespace KebbiBrain.App
                         else
                         {
                             int nr = _r + DR[_heading], nc = _c + DC[_heading];
-                            if (_map.IsObstacle(nr, nc)) { Crashed = true; _log("   💥 " + activeName + " 撞牆/出界！闖關失敗，回去改積木"); }
+                            if (_map.IsObstacle(nr, nc)) { if (!Crashed) TotalCrashes++; Crashed = true; _log("   💥 " + activeName + " 撞牆/出界！闖關失敗，回去改積木"); }
                             else { active.Move(0.1f); active.StopWheels(); _r = nr; _c = nc; Steps++; _log("   👣 " + activeName + " 前進到 (" + _r + "," + _c + ")（第 " + Steps + " 格）" + (_map.At(_r, _c) == '*' ? " ✨撿到寶物" : "")); }
                         }
                         break;
@@ -88,6 +91,7 @@ namespace KebbiBrain.App
                         if (ok)
                         {
                             ReachedGoal = true;
+                            if (_map != null) { int sp = _map.ShortestSteps(); Stars = sp > 0 && Steps <= sp ? 3 : sp > 0 && Steps <= sp + 2 ? 2 : 1; }
                             _bodyA.SetMotor(KebbiMotor.RShoulderY, 100f); _bodyA.SetMotor(KebbiMotor.LShoulderY, 100f);
                             _bodyB.SetMotor(KebbiMotor.RShoulderY, 100f); _bodyB.SetMotor(KebbiMotor.LShoulderY, 100f);
                             _log("   🏁 抵達終點！兩機同步舉雙手勝利手勢 🎉");
@@ -113,6 +117,14 @@ namespace KebbiBrain.App
             for (int j = ifIndex + 1; j < program.Count; j++)
                 if ((program[j] ?? "").Trim().ToUpperInvariant() == "ENDIF") return j;
             return program.Count; // 沒 ENDIF → 跳到結尾
+        }
+
+        // 闖關結算報告:第幾次嘗試成功/失敗、本次走幾格、累計撞牆幾次、效率星等。
+        public void PrintSummary()
+        {
+            string stars = ReachedGoal ? new string('★', Stars) + new string('☆', 3 - Stars) : "—";
+            _log("=== 闖關結算：第 " + Attempts + " 次嘗試" + (ReachedGoal ? "成功 🎉" : "失敗")
+                 + "、本次走 " + Steps + " 格、累計撞牆 " + TotalCrashes + " 次、效率 " + stars + " ===");
         }
 
         // 範例指令程式（無地圖版）：A 走 3 格＋轉彎 → 交棒 → B 走 2 格到終點
