@@ -181,19 +181,22 @@ namespace KebbiBrain
                 proBody, bus.CreateLink("控方-Kebbi"), new SimVoice(log),
                 defBody, bus.CreateLink("辯方-Kebbi"), new SimVoice(log), log);
 
-            log("========== G5《法庭辯論劇場》Demo（伽利略審判） ==========");
+            log("========== G5《法庭辯論劇場》Demo（伽利略審判 + 結辯投票計分） ==========");
             int n = 0;
             foreach (var ex in DebateGame.MakeGalileoDebate())
             {
-                log("\n（▶ 第 " + (++n) + " 回合接力辯論）");
-                await game.RunExchangeAsync(ex.Pro, ex.Def);
+                log("\n（▶ 第 " + (++n) + " 回合接力辯論 → 學生投票）");
+                await game.RunExchangeAsync(ex.Pro, ex.Def, ex.ProVotes, ex.DefVotes);
             }
             log("\n（▶ 爭點白熱化：兩機向中央逼近對峙）");
             await game.ApproachCenterAsync();
             log("\n（▶ 學生席右後方有人舉手 → 控方機轉頭面向）");
             await game.TurnToStudentAsync(true, 120f);
+            log("\n（▶ 結辯宣判：票多者勝、勝方舉手致意）");
+            await game.ConcludeAsync();
 
-            log("\n=== 完成 " + game.Exchanges + " 回合辯論、" + game.CenterApproaches + " 次中央逼近 ===");
+            log("");
+            game.PrintSummary();
             log("====================================================");
         }
 

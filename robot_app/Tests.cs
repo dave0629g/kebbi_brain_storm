@@ -35,6 +35,7 @@ namespace KebbiBrain
             T_G2_GeometryRelay();
             T_G2_Degrade();
             T_G5_Debate();
+            T_G5_Score();
             T_G1_RelayQuest();
             T_G1_Obstacle();
             T_Finale();
@@ -604,6 +605,49 @@ namespace KebbiBrain
             bool faced = game.TurnToStudentAsync(true, 45f).GetAwaiter().GetResult();
             Check("G5-轉向發言學生(NeckZ≈45)", Math.Abs(proBody.GetMotor(KebbiMotor.NeckZ) - 45f) < 0.01f);
             Check("G5-45° 可完整面向", faced);
+        }
+
+        // G5 結辯投票計分:逐回合計票 → 宣判勝方、勝方結辯舉手;平手不舉;可重入。(G5 原本是全專案唯一沒有 Score 的遊戲)
+        private static void T_G5_Score()
+        {
+            Action<string> noop = _ => { };
+            DebateGame NewGame(out SimKebbiBody pro, out SimKebbiBody def)
+            {
+                pro = new SimKebbiBody(noop, true); def = new SimKebbiBody(noop, true);
+                var bus = new SimRobotBus(noop);
+                return new App.DebateGame(pro, bus.CreateLink("控方"), new SimVoice(noop),
+                    def, bus.CreateLink("辯方"), new SimVoice(noop), noop);
+            }
+
+            // 整場伽利略辯論(辯方票多 控2:辯5)→ 辯方勝、辯方結辯舉手到 100
+            var g = NewGame(out _, out var def);
+            g.RunDebateAsync(App.DebateGame.MakeGalileoDebate()).GetAwaiter().GetResult();
+            Check("G5計分-票數累計(控2:辯5)", g.ProVotes == 2 && g.DefVotes == 5);
+            Check("G5計分-宣判辯方勝", g.Verdict == "辯方勝" && g.Concluded);
+            Check("G5計分-辯方結辯舉手(RShoulderY=100)", System.Math.Abs(def.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+
+            // 平手:兩回合各打平 → 平手、雙方都不舉到 100
+            var t = NewGame(out var pro2, out var def2);
+            t.RunDebateAsync(new System.Collections.Generic.List<App.DebateGame.Exchange> {
+                new App.DebateGame.Exchange("a", "b", 1, 1), new App.DebateGame.Exchange("c", "d", 2, 2),
+            }).GetAwaiter().GetResult();
+            Check("G5計分-平手(控3:辯3)", t.Verdict == "平手" && t.ProVotes == 3 && t.DefVotes == 3);
+            Check("G5計分-平手雙方不舉到 100",
+                System.Math.Abs(def2.GetMotor(KebbiMotor.RShoulderY) - 100f) > 0.01f &&
+                System.Math.Abs(pro2.GetMotor(KebbiMotor.RShoulderY) - 100f) > 0.01f);
+
+            // 控方勝:控方票多 → 控方勝、控方結辯舉手
+            var p = NewGame(out var pro3, out _);
+            p.RunDebateAsync(new System.Collections.Generic.List<App.DebateGame.Exchange> {
+                new App.DebateGame.Exchange("a", "b", 3, 0),
+            }).GetAwaiter().GetResult();
+            Check("G5計分-控方勝且控方結辯舉手", p.Verdict == "控方勝" && System.Math.Abs(pro3.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+
+            // 可重入:同實例跑兩場伽利略 → 第二場計數歸零不累加
+            var r = NewGame(out _, out _);
+            r.RunDebateAsync(App.DebateGame.MakeGalileoDebate()).GetAwaiter().GetResult();
+            r.RunDebateAsync(App.DebateGame.MakeGalileoDebate()).GetAwaiter().GetResult();
+            Check("G5計分-可重入:第二場票數歸零不累加(辯5 非 10、2 回合)", r.DefVotes == 5 && r.Exchanges == 2);
         }
 
         private static void T_G1_RelayQuest()
