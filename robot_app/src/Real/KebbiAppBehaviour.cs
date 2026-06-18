@@ -108,15 +108,17 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         Debug.Log("[G1Director] 完成:走 " + game.Steps + " 格、抵達終點=" + game.ReachedGoal);
     }
 
-    // ── 多機・被控(Controlled):收到中控的機身命令(BC|…)就動;非命令訊息印出 ──
+    // ── 多機・被控(Controlled):收到中控的機身命令(BC|…)就動、語音命令(VC|…)就用本機喇叭說;非命令訊息印出 ──
     private void RunControlled()
     {
         var realLink = new UnityRobotLink(robotId);
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
+        // 第 4 引數 ctx.Voice:讓被控機收到 VC|SAY 時用「自己的」喇叭說(G5 辯方/G2 乙機要自己開口)。
         new BodyCommandReceiver(realLink, ctx.Body,
-            (from, t) => Debug.Log("[Controlled] 非命令訊息(" + from + "): " + t));
-        Debug.Log("[Controlled] " + robotId + " 待命:收到中控機身命令即執行(保持 app 在前景)。");
+            (from, t) => Debug.Log("[Controlled] 非命令訊息(" + from + "): " + t),
+            ctx.Voice);
+        Debug.Log("[Controlled] " + robotId + " 待命:收到中控機身/語音命令即執行(保持 app 在前景)。");
     }
 
     void OnDestroy()

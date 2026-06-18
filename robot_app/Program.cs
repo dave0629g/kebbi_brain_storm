@@ -31,6 +31,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--g1") >= 0) { await PlayG1DemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--rv") >= 0) { await PlayRemoteVoiceDemoAsync(); return 0; }
+
 #if !UNITY
             if (cloudTest) return await Cloud.CloudCheck.RunAsync(Console.WriteLine);
 #endif
@@ -56,6 +58,7 @@ namespace KebbiBrain
             Console.WriteLine("  --g3              G3 鏡像體操教練");
             Console.WriteLine("  --g5              G5 法庭辯論劇場");
             Console.WriteLine("  --link            多機協作(雙機交棒 + 合體彩蛋廣播)");
+            Console.WriteLine("  --rv              示範:多機遠端語音(被控機用自己的喇叭說台詞 + 手勢)");
             Console.WriteLine("  --test            跑自我測試(全綠)");
             Console.WriteLine("  --cloud-test      雲端自測(需 Azure/OpenAI 金鑰)");
             Console.WriteLine("  --target cloudsim 真雲端跑 G4 整場 Demo(需金鑰)");
@@ -168,6 +171,56 @@ namespace KebbiBrain
             await game.TurnToStudentAsync(true, 120f);
 
             log("\n=== 完成 " + game.Exchanges + " 回合辯論、" + game.CenterApproaches + " 次中央逼近 ===");
+            log("====================================================");
+        }
+
+        // 示範小遊戲:多機「遠端語音」(RemoteVoiceProxy)——把 G5 辯論的「辯方」換成遠端被控機。
+        // 重點:DebateGame 程式『一字不改』,只把 defBody/defVoice 換成 Remote*Proxy → 辯方台詞改由「被控機自己的喇叭」說出。
+        // 對應 進度追蹤.md TODO#1「對方機要自己說話」;實機把 SimRobotBus 換成 UnityRobotLink(UDP)即同款跑法。
+        private static async Task PlayRemoteVoiceDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+
+            // ── 被控機(辯方):用「自己的」喇叭/機身,掛 BodyCommandReceiver 收中控的 VC|(語音)/BC|(機身)命令 ──
+            Action<string> devLog = s => log("      [辯方機·被控] " + s);
+            var realBus = new SimRobotBus(log);                 // 模擬中控↔被控的網路(實機=UDP 廣播)
+            var devLink = realBus.CreateLink("辯方機-被控");
+            var devVoice = new SimVoice(devLog);
+            var devBody = new SimKebbiBody(devLog, canMove: true);
+            new BodyCommandReceiver(devLink, devBody,
+                (from, t) => log("      [辯方機·被控] 非命令訊息(" + from + "): " + t), devVoice);
+
+            // ── 中控機(控方):本機自己的喇叭/機身;辯方則用 Remote*Proxy 經網路驅動被控機 ──
+            Action<string> proLog = s => log("      [控方機·中控] " + s);
+            var dirLink = realBus.CreateLink("控方機-中控");
+            var proBody = new SimKebbiBody(proLog, canMove: true);
+            var proVoice = new SimVoice(proLog);
+            var remoteDefBody = new RemoteBodyProxy(dirLink, "辯方機-被控", canMove: true);
+            var remoteDefVoice = new RemoteVoiceProxy(dirLink, "辯方機-被控", log);
+
+            // 遊戲內部「控方↔辯方」事件交棒(YOUR_TURN/BACK)走本機 loopback(不出網路、靜音不洗版);只有機身/語音命令才出網路。
+            var localBus = new SimRobotBus(_ => { });
+            var game = new DebateGame(
+                proBody, localBus.CreateLink("控方"), proVoice,
+                remoteDefBody, localBus.CreateLink("辯方"), remoteDefVoice, log);
+
+            log("========== 示範:多機「遠端語音」(RemoteVoiceProxy) ==========");
+            log("設定:控方=中控本機;辯方=遠端被控機。DebateGame 程式『一字不改』,");
+            log("      但辯方台詞與手勢會從『被控機』那台執行(下方有 [辯方機·被控] 標記者即是)。");
+            log("      你會看到 VC|SAY 命令越過『網路』(📡/📨)抵達被控機,再由它自己的喇叭說出。\n");
+
+            int n = 0;
+            foreach (var ex in DebateGame.MakeGalileoDebate())
+            {
+                log("（▶ 第 " + (++n) + " 回合:控方陳述 → 交棒 → 辯方『自己開口』反駁）");
+                await game.RunExchangeAsync(ex.Pro, ex.Def);
+                log("");
+            }
+            log("（▶ 爭點白熱化:兩機向中央逼近——辯方機也經遠端機身命令移動）");
+            await game.ApproachCenterAsync();
+
+            log("\n=== 完成 " + game.Exchanges + " 回合;辯方台詞全由『被控機自己的喇叭』說出(非中控代說) ===");
+            log("（實機:SimRobotBus→UnityRobotLink(UDP),被控機設 Mode=Controlled;先過必測④雙機收送）");
             log("====================================================");
         }
 

@@ -24,6 +24,7 @@ namespace KebbiBrain
             T_RobotLink();
             T_RobotLinkProtocol();
             T_RemoteBody();
+            T_RemoteVoice();
             T_Direction_Edges();
             T_HeadClamp_Edges();
             T_BodyCommand_Edges();
@@ -228,6 +229,22 @@ namespace KebbiBrain
             public float NeckZMaxDeg => 90f;
         }
 
+        // 記錄式語音:給遠端語音命令測試斷言(SimVoice 的 Speak 只 log,無狀態可驗)。
+        // 記成 List 以驗「順序」;另留 LastText/LastLang 便利欄位與可預排的 ListenAsync 佇列(供後續 G4 誤接情境)。
+        private sealed class RecordingVoice : IVoice
+        {
+            public readonly System.Collections.Generic.List<(string text, string lang)> Spoken
+                = new System.Collections.Generic.List<(string text, string lang)>();
+            public string LastText => Spoken.Count > 0 ? Spoken[Spoken.Count - 1].text : null;
+            public string LastLang => Spoken.Count > 0 ? Spoken[Spoken.Count - 1].lang : null;
+            private readonly System.Collections.Generic.Queue<string> _heard = new System.Collections.Generic.Queue<string>();
+            public void EnqueueHeard(string t) => _heard.Enqueue(t);
+            public System.Threading.Tasks.Task SpeakAsync(string text, string lang = "id-ID")
+            { Spoken.Add((text, lang)); return System.Threading.Tasks.Task.CompletedTask; }
+            public System.Threading.Tasks.Task<string> ListenAsync(string lang = "id-ID")
+            { return System.Threading.Tasks.Task.FromResult(_heard.Count > 0 ? _heard.Dequeue() : ""); }
+        }
+
         // 遠端機身控制:中控用 RemoteBodyProxy 經 link 驅動被控機(BodyCommandReceiver 套用到本機 body)。
         // 這是「真機多台分散式跑同一套劇本」的關鍵層,純 C# 可在此驗證(實機只剩 UDP 傳輸,必測④)。
         private static void T_RemoteBody()
@@ -265,6 +282,98 @@ namespace KebbiBrain
                 BodyCommand.TryApply(BodyCommand.SetMotor(KebbiMotor.NeckZ, -45.5f, 50f), spy)
                 && Math.Abs(spy.GetMotor(KebbiMotor.NeckZ) + 45.5f) < 0.01f);
             Check("遠端-壞命令不套用(回 false)", !BodyCommand.TryApply("NOTBC|x", spy));
+        }
+
+        // 遠端語音控制:中控用 RemoteVoiceProxy 經 link 讓被控機「用自己的喇叭」說台詞(VC|SAY 命令)。
+        // 這是 G5 辯方/G2 乙機「對方機自己開口」的關鍵層。涵蓋:序列化邊角(含 '|'/空台詞/lang=null/lang 含 '|')、
+        // 壞命令不丟例外、兩層編碼往返、順序保證、BC/VC/一般訊息混流零污染、handler 覆寫整合。純 C# 可驗(實機 UDP 必測④)。
+        private static void T_RemoteVoice()
+        {
+            Action<string> noop = _ => { };
+            var bus = new SimRobotBus(noop);
+            var dir = bus.CreateLink("DIR");
+            var dev = bus.CreateLink("DEV");
+            var devVoice = new RecordingVoice();
+            new BodyCommandReceiver(dev, new RecordingBody(), null, devVoice);
+            var proxy = new RemoteVoiceProxy(dir, "DEV", noop);
+
+            // 基本:SAY 套到被控機 voice、lang 保留
+            proxy.SpeakAsync("控方陳述", "zh-TW").GetAwaiter().GetResult();
+            Check("遠端語音-SAY 套到被控機 voice", devVoice.LastText == "控方陳述");
+            Check("遠端語音-lang 保留", devVoice.LastLang == "zh-TW");
+
+            // text 含 '|' 不被截斷(限數量切割保最後一欄)
+            proxy.SpeakAsync("a|b|c", "zh-TW").GetAwaiter().GetResult();
+            Check("遠端語音-text 含 '|' 不截斷", devVoice.LastText == "a|b|c");
+
+            // 空台詞 round-trip:TryApply 回 true、收到空字串(對齊 RobotLinkProtocol 空 text 可解析)
+            Check("遠端語音-空台詞命令成立(回 true、收空字串)",
+                VoiceCommand.TryApply(VoiceCommand.Speak("", "zh-TW"), devVoice) && devVoice.LastText == "");
+
+            // lang=null 正規化:預設值不過 wire → 兩端回填 id-ID
+            proxy.SpeakAsync("halo", null).GetAwaiter().GetResult();
+            Check("遠端語音-lang=null 正規化為 id-ID", devVoice.LastLang == "id-ID");
+
+            // 長中文台詞「兩層編碼」(VoiceCommand + RobotLinkProtocol)往返逐字相等
+            string longLine = "辯方：望遠鏡觀測到木星有四顆衛星繞行，顯示並非萬物皆繞地球；慣性使我們感覺不到等速運動。";
+            byte[] frame = RobotLinkProtocol.Frame("DIR", "DEV", VoiceCommand.Speak(longLine, "zh-TW"));
+            RobotLinkProtocol.TryParse(frame, frame.Length, out _, out _, out var inner);
+            Check("遠端語音-長中文台詞兩層編碼往返",
+                VoiceCommand.TryApply(inner, devVoice) && devVoice.LastText == longLine);
+
+            // 壞命令/邊界:缺欄位/未知子命令/空字串/voice==null/非 VC → 一律回 false 且不丟例外(守 IndexOutOfRange)
+            Check("遠端語音-VC|SAY 缺欄位回 false", !VoiceCommand.TryApply("VC|SAY", devVoice));
+            Check("遠端語音-VC|SAY|zh-TW 缺 text 回 false", !VoiceCommand.TryApply("VC|SAY|zh-TW", devVoice));
+            Check("遠端語音-未知子命令 VC|FOO 回 false", !VoiceCommand.TryApply("VC|FOO|zh-TW|x", devVoice));
+            Check("遠端語音-空字串回 false", !VoiceCommand.TryApply("", devVoice));
+            Check("遠端語音-voice==null 回 false", !VoiceCommand.TryApply("VC|SAY|zh-TW|x", null));
+            Check("遠端語音-非 VC(BC 機身命令)回 false", !VoiceCommand.TryApply(BodyCommand.Move(0.1f), devVoice));
+
+            // lang 含分隔符防呆:Speak fail-fast 拋 ArgumentException
+            bool threw = false;
+            try { VoiceCommand.Speak("x", "zh|TW"); } catch (ArgumentException) { threw = true; }
+            Check("遠端語音-lang 含 '|' 拋 ArgumentException", threw);
+
+            // ListenAsync 不支援遠端聽 → 回空字串
+            Check("遠端語音-ListenAsync 回空字串", proxy.ListenAsync().GetAwaiter().GetResult() == "");
+
+            // 順序保證:Speak A、Speak B、SetMotor 三連發 → voice 依序記、body 也套到(Sim 同步遞送)
+            var dev2Voice = new RecordingVoice();
+            var dev2Body = new RecordingBody();
+            var dev2 = bus.CreateLink("DEV2");
+            new BodyCommandReceiver(dev2, dev2Body, null, dev2Voice);
+            var pv2 = new RemoteVoiceProxy(dir, "DEV2", noop);
+            var pb2 = new RemoteBodyProxy(dir, "DEV2", canMove: true);
+            pv2.SpeakAsync("第一句", "zh-TW").GetAwaiter().GetResult();
+            pv2.SpeakAsync("第二句", "zh-TW").GetAwaiter().GetResult();
+            pb2.SetMotor(KebbiMotor.RShoulderY, 70f);
+            Check("遠端語音-順序:第一句先到", dev2Voice.Spoken.Count == 2 && dev2Voice.Spoken[0].text == "第一句");
+            Check("遠端語音-順序:第二句後到", dev2Voice.Spoken[1].text == "第二句");
+            Check("遠端語音-順序:機身命令也套到", Math.Abs(dev2Body.GetMotor(KebbiMotor.RShoulderY) - 70f) < 0.01f);
+
+            // 混流零污染:BC|SM + VC|SAY + HANDOFF 三種混送 → body/voice/alsoHandle 各收各的、零交叉污染
+            var mBody = new RecordingBody();
+            var mVoice = new RecordingVoice();
+            string also = null;
+            var mLink = bus.CreateLink("MIX");
+            new BodyCommandReceiver(mLink, mBody, (f, t) => also = t, mVoice);
+            dir.SendAsync("MIX", BodyCommand.SetMotor(KebbiMotor.NeckZ, 30f, 50f)).GetAwaiter().GetResult();
+            dir.SendAsync("MIX", VoiceCommand.Speak("台詞", "zh-TW")).GetAwaiter().GetResult();
+            dir.SendAsync("MIX", "HANDOFF#1").GetAwaiter().GetResult();
+            Check("遠端語音-混流:機身命令只進 body", Math.Abs(mBody.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.01f);
+            Check("遠端語音-混流:語音命令只進 voice", mVoice.LastText == "台詞");
+            Check("遠端語音-混流:一般訊息只進 alsoHandle", also == "HANDOFF#1");
+
+            // handler 覆寫整合:被控 link 同時掛 BodyCommandReceiver(localVoice)+遊戲交棒(alsoHandle)→ 互不吞
+            var iVoice = new RecordingVoice();
+            bool yourTurn = false;
+            var iLink = bus.CreateLink("INTG");
+            new BodyCommandReceiver(iLink, new RecordingBody(),
+                (f, t) => { if (t == "YOUR_TURN") yourTurn = true; }, iVoice);
+            dir.SendAsync("INTG", VoiceCommand.Speak("辯方反駁", "zh-TW")).GetAwaiter().GetResult();
+            dir.SendAsync("INTG", "YOUR_TURN").GetAwaiter().GetResult();
+            Check("遠端語音-整合:台詞套到 voice", iVoice.LastText == "辯方反駁");
+            Check("遠端語音-整合:交棒訊息仍進 alsoHandle(未被誤吞)", yourTurn);
         }
 
         // 方位扇區邊界 + 角度正規化 + 印尼語詞往返(把 G4 的方位判定逼到邊角)。
