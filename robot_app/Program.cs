@@ -35,6 +35,14 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--finale") >= 0) { await PlayFinaleDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--g5t") >= 0) { await PlayG5TrialDemoAsync(); return 0; }
+
+            if (Array.IndexOf(args, "--g4t") >= 0) { await PlayG4TournamentDemoAsync(); return 0; }
+
+            if (Array.IndexOf(args, "--g3r") >= 0) { await PlayG3RewindDemoAsync(); return 0; }
+
+            if (Array.IndexOf(args, "--g2v") >= 0) { await PlayG2ValidatorDemoAsync(); return 0; }
+
 #if !UNITY
             if (cloudTest) return await Cloud.CloudCheck.RunAsync(Console.WriteLine);
 #endif
@@ -62,6 +70,10 @@ namespace KebbiBrain
             Console.WriteLine("  --link            多機協作(雙機交棒 + 合體彩蛋廣播)");
             Console.WriteLine("  --rv              示範:多機遠端語音(被控機用自己的喇叭說台詞 + 手勢)");
             Console.WriteLine("  --finale          示範:合體彩蛋多機接力大舞台(含離線站降級跳過)");
+            Console.WriteLine("  --g5t             G5 七步審判驅動器 + 學生席舉手插話分支");
+            Console.WriteLine("  --g4t             G4 裁判賽多輪排名（視角轉換 + 聲源核對）");
+            Console.WriteLine("  --g3r             G3 鏡像教練:逐幀回退(喊「再一次」回退一幀重示範,手冊 step4)");
+            Console.WriteLine("  --g2v             G2 學生自編腳本驗證(結構把關:缺步/層次錯置→才放行接力)");
             Console.WriteLine("  --test            跑自我測試(全綠)");
             Console.WriteLine("  --cloud-test      雲端自測(需 Azure/OpenAI 金鑰)");
             Console.WriteLine("  --target cloudsim 真雲端跑 G4 整場 Demo(需金鑰)");
@@ -468,5 +480,188 @@ namespace KebbiBrain
             b.CurrentDoa = angle; enqueue(spoken);
             await g.ForwardRoundAsync(asked);
         }
+
+        // G5《法庭辯論劇場》七步審判驅動器 Demo（RunTrialAsync + 學生席舉手插話分支，純 Sim）
+        // 演手冊:整場 7 步固定流程(開庭→陳述/交棒/反駁→逼近→轉向學生→結辯),
+        //         並在某回合掛「學生舉手插話」——先確認真的舉手(姿態 gate)→ 近側機轉頭面向 → 用學生麥聽一句 → 回應 → 改票。
+        private static async Task PlayG5TrialDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var proBody = new SimKebbiBody(log, canMove: true);
+            var defBody = new SimKebbiBody(log, canMove: true);
+            var bus = new SimRobotBus(log);
+
+            // 學生席麥克風(SimVoice 當麥,EnqueueHeard 預排學生會說的話)+ 姿態 gate(Enqueue(true) 表真的舉手)。
+            var studentMic = new SimVoice(log);
+            studentMic.EnqueueHeard("可是教會後來也承認了日心說，這算不算反證？");
+            var pose = new SimPoseSensor(log);
+            pose.Enqueue(true); // 第一位插話學生:真的舉手 → 走分支
+
+            var game = new DebateGame(
+                proBody, bus.CreateLink("控方-Kebbi"), new SimVoice(log),
+                defBody, bus.CreateLink("辯方-Kebbi"), new SimVoice(log), log,
+                studentMic, pose); // 新 9 參數建構式:掛學生麥 + 姿態 gate
+
+            log("========== G5《法庭辯論劇場》七步審判 Demo（RunTrialAsync + 學生席舉手插話） ==========");
+            log("（流程:[1/7]開庭 → [2-4/7]逐回合 陳述/交棒/反駁 → 某回合『🙋 學生舉手插話』→ [5/7]逼近 → [6/7]轉向學生席 → [7/7]結辯宣判）");
+            log("（▶ 第 2 回合右後方(120°)學生舉手 → 姿態 gate 確認舉手 → 辯方機轉頭面向 → 學生麥聽一句 → 辯方回應 → 辯方 +1 票）\n");
+
+            await game.RunTrialAsync(DebateGame.MakeGalileoTrial());
+
+            log("");
+            game.PrintSummary();
+
+            // 對照組:同一場但學生『沒舉手』(姿態 gate 回 false)→ 插話被忽略、不轉頭、不改票,凸顯 gate 分支。
+            log("\n【對照 ▶ 同一回合學生『沒真的舉手』→ 姿態 gate 擋下、插話被忽略、票數不變】");
+            var pro2 = new SimKebbiBody(log, canMove: true);
+            var def2 = new SimKebbiBody(log, canMove: true);
+            var bus2 = new SimRobotBus(log);
+            var pose2 = new SimPoseSensor(log);
+            pose2.Enqueue(false); // 沒舉手 → 略過分支
+            var game2 = new DebateGame(
+                pro2, bus2.CreateLink("控方-Kebbi"), new SimVoice(log),
+                def2, bus2.CreateLink("辯方-Kebbi"), new SimVoice(log), log,
+                new SimVoice(log), pose2);
+            await game2.RunTrialAsync(DebateGame.MakeGalileoTrial());
+            log("→ 沒舉手:插話數=" + game2.Interjections + "、辯方票=" + game2.DefVotes
+                + "（對照有舉手:插話數=" + game.Interjections + "、辯方票=" + game.DefVotes + "）");
+
+            log("\n=== 重點:7 步固定流程一鍵跑完;學生舉手插話走『姿態 gate → 轉頭 → 學生麥 → 回應 → 改票』分支,沒舉手則自動跳過 ===");
+            log("====================================================");
+        }
+
+        // G4《Tebak Arah》裁判賽多輪排名 Demo（裁判賽 + 視角轉換 + round-robin 排名，純 Sim）
+        // 演手冊步驟 4（A 描述 B、Kebbi 用聲源 DOA 核對 + 轉頭面向 B）與步驟 5（視角轉換 + 累積排名）。
+        private static async Task PlayG4TournamentDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var body = new SimKebbiBody(log, canMove: false);
+            var voice = new SimVoice(log);
+            var ctx = new KebbiContext(body, voice, new SimLlm(log), log);
+            var game = new TebakArahGame(ctx);
+
+            log("========== G4《Tebak Arah》裁判賽多輪排名 Demo ==========");
+            log("（▶ 校準階段：四位學生分坐機器人四周）");
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Andi", 90);   // 右
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Budi", -90);  // 左
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Citra", 0);   // 前
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Dewi", 170);  // 後
+
+            log("\n（▶ 裁判賽示範：Andi 描述 Budi 的方位 → Kebbi 用 Budi 的 DOA 真值核對 + 轉頭面向 Budi）");
+            body.CurrentDoa = -90; voice.EnqueueHeard("Budi di kiri"); // Budi 在左 → 答對
+            var jr = await game.JudgeRoundAsync(new TebakArahGame.MatchSpec("Andi", "Budi"));
+            log("→ 裁判結果：Andi " + (jr.Correct ? "答對 ✔（+1）" : "答錯 ✘") + "、轉頭" + (jr.Faced ? "完整面向" : "被夾限") + " Budi");
+
+            log("\n（▶ 視角轉換高光：Citra(前) 同時說 Andi(右) 相對 Kebbi 與相對自己的方位）");
+            log("   手冊核心：『Kamu di kiri saya, tapi di kanan Kebbi』（我的左、卻是 Kebbi 的右）");
+            voice.EnqueueHeard("di kanan"); // 相對 Kebbi：Andi 在右 → Kanan
+            voice.EnqueueHeard("di kiri");  // 相對 Citra(面向 Kebbi)：左右翻轉 → Kiri
+            var pr = await game.PerspectiveRoundAsync("Citra", "Andi");
+            log("→ 視角題：相對 Kebbi=" + Direction.ToIndo(pr.ActualSector)
+                + "、相對 Citra=" + Direction.ToIndo(pr.PerspectiveSector)
+                + " → " + (pr.Correct ? "兩者皆對 ✔（+1）" : "未全對 ✘"));
+
+            log("\n（▶ 多輪賽事：四人 round-robin 逐場裁判賽 → 累積積分排名）");
+            var matches = TebakArahGame.MakeRoundRobin(new[] { "Andi", "Budi", "Citra", "Dewi" });
+            // 為每一場預排「被描述者此刻的 DOA 真值」與「提問者的方位詞答案」。
+            // 讓 Budi 全對、Andi 部分對、其餘較弱，凸顯排名差異。
+            var seats = new System.Collections.Generic.Dictionary<string, float> {
+                { "Andi", 90f }, { "Budi", -90f }, { "Citra", 0f }, { "Dewi", 170f } };
+            foreach (var m in matches)
+            {
+                float doa = seats[m.TargetName];
+                // 簡化腳本：Budi 當提問者一律答對；其餘提問者一律答錯（示範排名落差）。
+                string word = m.AskerName == "Budi" ? Direction.ToIndo(Direction.FromAngle(doa)) : "di depan";
+                body.CurrentDoa = doa; voice.EnqueueHeard(word);
+            }
+            // 注意：RunTournamentAsync 逐場讀 body.CurrentDoa；此 Demo 各場真值相近僅作示範，
+            // 真正的逐場真值核對在 --test 用 SeqDoaBody 精確驗證。
+            await game.RunTournamentAsync(matches);
+            game.PrintRanking();
+
+            log("\n=== 重點：聲源 DOA 當真值核對方位詞、轉頭具身回饋、視角轉換糾錯、多輪累積排名（平手以校準序 stable）===");
+            log("====================================================");
+        }
+
+        // G3《鏡像教練·逐幀回退》Demo（純 Sim，免金鑰）——手冊 step4：學生喊「再一次」→ Kebbi 回退一幀重新示範同一動作。
+        private static async Task PlayG3RewindDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var body = new SimKebbiBody(log, canMove: false);
+            var pose = new SimPoseSensor(log);
+            var ctx = new KebbiContext(body, new SimVoice(log), new SimLlm(log), log);
+            var game = new MirrorCoachGame(ctx, pose);
+            var move = MirrorCoachGame.MakeWarmup();
+
+            log("========== G3《鏡像教練·逐幀回退》文字模擬器 Demo ==========");
+            log("（▶ 學生喊『再一次』→ Kebbi 回退一幀、重新示範同一動作）");
+            // 模擬學生跟不上(姿態錯)並預排語音「再一次」,讓 RunRepAsync 內建攔截觸發 HandleAgainAsync。
+            pose.Enqueue(false);
+            ((SimVoice)ctx.Voice).EnqueueHeard("再一次");
+            await game.RunRepAsync(move);
+            log("→ 目前停在第 " + (game.CurrentFrame + 1) + " 幀（共 " + move.Frames.Count + " 幀），重新示範中：索引已由末幀回退一幀。");
+
+            game.PrintSummary();
+            log("====================================================");
+        }
+
+        // G2《幾何證明接力站》學生自編腳本「結構驗證器」Demo（純 Sim）
+        // 手冊命脈:學生先把證明步驟序列排出來,Kebbi 對「結構」把關(缺步/層次錯置)→ 指出第幾步哪種錯,
+        // 改正後才放行接力(RunProofIfValidAsync)——呼應「腳本改正 → 才能往下」的即時因果回饋。
+        private static async Task PlayG2ValidatorDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+
+            // 標準解(等腰底角學習單版):Layer 序列 = 已知/因為/所以。validator 以此為結構基準。
+            var expected = GeometryRelayGame.MakeIsoscelesProofWorksheet();
+
+            // 深拷貝標準解以產生「學生腳本」(改 Layer 時不污染標準解)。
+            GeometryRelayGame.Step Copy(GeometryRelayGame.Step s)
+                => new GeometryRelayGame.Step(s.Reason, s.Edge, s.ArmAngle, s.Layer);
+            System.Collections.Generic.List<GeometryRelayGame.Step> Clone()
+            {
+                var l = new System.Collections.Generic.List<GeometryRelayGame.Step>();
+                foreach (var s in expected) l.Add(Copy(s));
+                return l;
+            }
+
+            GeometryRelayGame NewGame(out SimVoice voice)
+            {
+                var bus = new SimRobotBus(log);
+                voice = new SimVoice(log);
+                return new GeometryRelayGame(new SimKebbiBody(log, true),
+                    bus.CreateLink("甲機(指引)"), bus.CreateLink("乙機(推理)"), voice, log);
+            }
+
+            log("========== G2《幾何證明接力站》學生自編腳本驗證 Demo ==========");
+            log("（題目：證明等腰三角形兩底角相等；請學生先把證明步驟排出來，Kebbi 先驗結構再放行接力）");
+
+            // ── 腳本一:正確腳本 → 驗證通過 → 跑完 3 步接力 ──
+            log("\n【腳本一 ▶ 正確腳本：已知 → 因為 → 所以】");
+            var g1 = NewGame(out var v1);
+            v1.EnqueueHeard("已知"); v1.EnqueueHeard("因為"); v1.EnqueueHeard("所以"); // 學習單作答
+            var ok = await g1.RunProofIfValidAsync(Clone(), expected);
+            log("→ 驗證：" + (ok.Ok ? "通過 ✅ " : "未過 ⛔ ") + ok.Message + "；完成 " + g1.StepsDone + " 步接力");
+
+            // ── 腳本二:缺步(只排 2 步,少了結論)→ validator 指『缺第 3 步』、不接力 ──
+            log("\n【腳本二 ▶ 缺步：只排 2 步，少了『所以』那一步結論】");
+            var g2 = NewGame(out _);
+            var missing = Clone(); missing.RemoveAt(2);
+            var chk2 = await g2.RunProofIfValidAsync(missing, expected);
+            log("→ 驗證：未過 ⛔ 第 " + chk2.Step + " 步問題 — " + chk2.Message);
+            log("   （Kebbi：少了結論那一步，請補上『所以』再來接力；StepsDone=" + g2.StepsDone + " 沒有接力）");
+
+            // ── 腳本三:層次錯置(把第 2 步『因為』標成『所以』)→ validator 指『第 2 步邏輯層次錯置』、不接力 ──
+            log("\n【腳本三 ▶ 邏輯層次錯置：第 2 步『因為』被標成『所以』】");
+            var g3 = NewGame(out _);
+            var wrong = Clone(); wrong[1].Layer = "所以";
+            var chk3 = await g3.RunProofIfValidAsync(wrong, expected);
+            log("→ 驗證：未過 ⛔ 第 " + chk3.Step + " 步問題 — " + chk3.Message);
+            log("   （Kebbi：第 " + chk3.Step + " 步層次標錯了，改好再接力；StepsDone=" + g3.StepsDone + " 沒有接力）");
+
+            log("\n=== 重點：腳本『結構』把關(缺步/層次錯置)→ 指出第幾步哪種錯 → 改正才放行接力 ===");
+            log("====================================================");
+        }
+
     }
 }

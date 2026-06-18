@@ -43,6 +43,10 @@ namespace KebbiBrain
             T_G1_Obstacle();
             T_G1_Score();
             T_Finale();
+            T_G5_Trial();
+            T_G4_Judge();
+            T_G3_Rewind();
+            T_G2_Validator();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -925,5 +929,479 @@ namespace KebbiBrain
             Check("彩蛋-非同步延遲回應:中控 await 等到 → 跑 1 站(證明非同步路徑正確)",
                 gameAsync.StationsRun == 1 && gameAsync.StationsSkipped == 0);
         }
+
+        // G5-branch 七步審判驅動器 RunTrialAsync + 學生席舉手插話分支。
+        // 驗:7 步流程跑滿、開場/結辯順序、插話改票、轉向學生 NeckZ 夾限、姿態 gate(舉手/沒舉手)、
+        //     學生麥 listen 路徑、可重入、無插話=退化舊行為、舊 7 參數建構式仍可跑。
+        private static void T_G5_Trial()
+        {
+            Action<string> noop = _ => { };
+
+            // 用新 9 參數建構式建一場(可注入學生麥/姿態 gate);out 出兩機身與兩主辯語音供斷言。
+            DebateGame NewTrial(out SimKebbiBody pro, out SimKebbiBody def,
+                                out RecordingVoice proV, out RecordingVoice defV,
+                                IVoice studentMic = null, IPoseSensor pose = null)
+            {
+                pro = new SimKebbiBody(noop, true); def = new SimKebbiBody(noop, true);
+                proV = new RecordingVoice(); defV = new RecordingVoice();
+                var bus = new SimRobotBus(noop);
+                return new App.DebateGame(pro, bus.CreateLink("控方"), proV,
+                    def, bus.CreateLink("辯方"), defV, noop, studentMic, pose);
+            }
+
+            // (1) 7 步流程跑滿:MakeGalileoTrial → 2 回合接力都成功、逼近 1 次、宣判完成、插話計 1。
+            var g = NewTrial(out _, out var def1, out _, out _);
+            g.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            Check("G5審判-7步:2 回合接力成功(Exchanges==2)", g.Exchanges == 2);
+            Check("G5審判-7步:步驟5 逼近一次(CenterApproaches==1)", g.CenterApproaches == 1);
+            Check("G5審判-7步:結辯完成(Concluded)", g.Concluded);
+
+            // (2) 插話改票:伽利略基礎辯方 5 票,第 2 回合掛 DefVoteDelta=1 的插話 → 跑後辯方 6 票、插話計 1。
+            Check("G5審判-插話改票:辯方票含插話加成(5+1=6)", g.DefVotes == 6);
+            Check("G5審判-插話改票:成功處理 1 次插話(Interjections==1)", g.Interjections == 1);
+            Check("G5審判-插話改票:仍宣判辯方勝(控2:辯6)", g.Verdict == "辯方勝");
+
+            // (3) 轉向學生:插話 ProSide=false、DoaDeg=120 → 辯方機 NeckZ 被夾限到 90(正後盲區)。
+            float expected = KebbiHead.TurnToward(new SimKebbiBody(noop, false), 120f, out bool reach120);
+            Check("G5審判-轉向學生:辯方機 NeckZ 夾限到 120 的 clamped 值",
+                System.Math.Abs(def1.GetMotor(KebbiMotor.NeckZ) - expected) < 0.01f);
+            Check("G5審判-轉向學生:120 度落在頭轉不到區(夾限)", !reach120);
+
+            // (4) 開場/結辯順序:自訂 Opening+Closing,用 RecordingVoice 驗開場白先說、結辯詞在宣判前說。
+            var g2 = NewTrial(out _, out _, out var proV2, out _);
+            var script = new App.DebateGame.TrialScript
+            {
+                Opening = "【自訂開場】開庭。",
+                Closing = "【自訂結辯】控方總結。",
+                Rounds = App.DebateGame.MakeGalileoDebate(),
+            };
+            g2.RunTrialAsync(script).GetAwaiter().GetResult();
+            int idxOpen = proV2.Spoken.FindIndex(x => x.text == "【自訂開場】開庭。");
+            int idxClose = proV2.Spoken.FindIndex(x => x.text == "【自訂結辯】控方總結。");
+            int idxVerdict = proV2.Spoken.FindIndex(x => x.text == "控方勝訴。");
+            Check("G5審判-順序:開場白由控方機最先說(index 0)", idxOpen == 0);
+            Check("G5審判-順序:結辯詞在開場白之後說出", idxClose > idxOpen);
+            // 此腳本無插話、控2:辯5 → 辯方勝,故控方不說「控方勝訴。」(idxVerdict==-1);結辯詞仍應在最後。
+            Check("G5審判-順序:辯方勝故控方不宣勝、自訂結辯詞為控方最後一句",
+                idxVerdict < 0 && idxClose == proV2.Spoken.Count - 1);
+
+            // (5) 姿態 gate-有舉手:注入 SimPoseSensor.Enqueue(true) → 走分支、插話計 1、票含加成。
+            var poseYes = new SimPoseSensor(noop);
+            poseYes.Enqueue(true);
+            var gy = NewTrial(out _, out _, out _, out _, pose: poseYes);
+            gy.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            Check("G5審判-姿態gate舉手:走分支(Interjections==1)", gy.Interjections == 1);
+            Check("G5審判-姿態gate舉手:票含插話加成(辯6)", gy.DefVotes == 6);
+
+            // (6) 姿態 gate-沒舉手:Enqueue(false) → 略過分支、不轉頭不改票、插話計 0。
+            var poseNo = new SimPoseSensor(noop);
+            poseNo.Enqueue(false);
+            var gn = NewTrial(out _, out var defN, out _, out _, pose: poseNo);
+            gn.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            Check("G5審判-姿態gate沒舉手:略過分支(Interjections==0)", gn.Interjections == 0);
+            Check("G5審判-姿態gate沒舉手:票不含插話加成(辯5)", gn.DefVotes == 5);
+            // 沒舉手 → HandleInterjection 在 TurnTo 之前 return,步驟6也不觸發,辯方機 NeckZ 不應被設(維持 0)。
+            Check("G5審判-姿態gate沒舉手:不轉頭(NeckZ 未被設,維持 0)",
+                System.Math.Abs(defN.GetMotor(KebbiMotor.NeckZ) - 0f) < 0.01f);
+
+            // (7) 學生麥 listen 路徑:注入 SimVoice 當學生麥並 EnqueueHeard → log 走 listen、不影響既有交棒。
+            var mic = new SimVoice(noop);
+            mic.EnqueueHeard("自訂插話內容");
+            string captured = null;
+            Action<string> capLog = s => { if (s.Contains("自訂插話內容")) captured = s; };
+            var micPro = new SimKebbiBody(noop, true); var micDef = new SimKebbiBody(noop, true);
+            var micBus = new SimRobotBus(noop);
+            var gm = new App.DebateGame(micPro, micBus.CreateLink("控方"), new SimVoice(noop),
+                micDef, micBus.CreateLink("辯方"), new SimVoice(noop), capLog, mic, null);
+            gm.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            Check("G5審判-學生麥:listen 路徑取得麥克風內容(非腳本 InterjectionText)", captured != null);
+            Check("G5審判-學生麥:不影響既有交棒(Exchanges==2)", gm.Exchanges == 2);
+
+            // (8) 可重入:同實例連跑兩場 MakeGalileoTrial → 第二場辯6(非 12)、Exchanges 2、Interjections 1。
+            var gr = NewTrial(out _, out _, out _, out _);
+            gr.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            gr.RunTrialAsync(App.DebateGame.MakeGalileoTrial()).GetAwaiter().GetResult();
+            Check("G5審判-可重入:第二場票數/插話歸零不累加(辯6、Ex2、Inj1)",
+                gr.DefVotes == 6 && gr.Exchanges == 2 && gr.Interjections == 1);
+
+            // (9) 無插話=退化舊行為:TrialScript 不掛插話且 studentMic/poseSensor 皆 null(走舊建構式)
+            //     → 票數/回合與直接 RunDebateAsync(MakeGalileoDebate) 完全相同。
+            var oldPro = new SimKebbiBody(noop, true); var oldDef = new SimKebbiBody(noop, true);
+            var oldBus = new SimRobotBus(noop);
+            var gOld = new App.DebateGame(oldPro, oldBus.CreateLink("控方"), new SimVoice(noop),
+                oldDef, oldBus.CreateLink("辯方"), new SimVoice(noop), noop); // 舊 7 參數建構式
+            gOld.RunTrialAsync(new App.DebateGame.TrialScript { Rounds = App.DebateGame.MakeGalileoDebate() })
+                .GetAwaiter().GetResult();
+            Check("G5審判-退化:無插話走舊建構式票數同 RunDebate(控2:辯5)",
+                gOld.ProVotes == 2 && gOld.DefVotes == 5 && gOld.Exchanges == 2);
+            Check("G5審判-退化:無插話則 Interjections==0、仍宣判完成", gOld.Interjections == 0 && gOld.Concluded);
+
+            // (10) 舊建構式仍可呼叫 RunTrialAsync(證明新建構式重載未破壞舊 7 參數簽章)。
+            Check("G5審判-舊建構式:仍能跑 RunTrialAsync 並宣判辯方勝", gOld.Verdict == "辯方勝");
+        }
+
+        // G4-judge：裁判賽（A 描述 B → Kebbi 用 DOA 真值核對 + 轉頭面向 B）、視角轉換（B 相對 Kebbi vs 相對 A）、
+        // 多輪排名（round-robin 逐場累積分、降冪排名、平手以校準序 stable、可重入）。
+        // 全程不污染舊 Score（裁判分只進獨立 _matchScores/TournamentRounds）。
+        private static void T_G4_Judge()
+        {
+            // 一個「可逐場腳本化 DOA」的記錄式身體：ReadDoaDegrees() 依序回傳預排角度（給 tournament 多場各自真值）。
+            // 同時保留 NeckZ 夾限語意（沿用 SimKebbiBody 的 ±90），故 Faced 在正後方會是 false。
+            float[] DoaSeq(params float[] xs) => xs;
+
+            // 建一個已校準 4 生的遊戲（Andi 右90 / Budi 左-90 / Citra 前0 / Dewi 後170）。
+            TebakArahGame Calibrated(out SimKebbiBody body, out SimVoice voice)
+            {
+                var ctx = SilentSim(out var b, out var v);
+                var g = new TebakArahGame(ctx);
+                void Cal(string n, float a) { b.CurrentDoa = a; v.EnqueueHeard("Saya di sini!"); g.CalibrateOneAsync(n).GetAwaiter().GetResult(); }
+                Cal("Andi", 90f); Cal("Budi", -90f); Cal("Citra", 0f); Cal("Dewi", 170f);
+                body = b; voice = v;
+                return g;
+            }
+
+            // ── 1) 裁判賽-正確：A 說 "di kanan"、B 真值 DOA=90(Kanan) → Correct、A 計分、Faced=true ──
+            {
+                var g = Calibrated(out var body, out var voice);
+                body.CurrentDoa = 90f; voice.EnqueueHeard("Budi di kanan");
+                var r = g.JudgeRoundAsync(new TebakArahGame.MatchSpec("Andi", "Budi")).GetAwaiter().GetResult();
+                Check("G4裁判-正確: Correct=true", r.Correct);
+                Check("G4裁判-正確: 真值=Kanan", r.ActualSector == Dir.Kanan);
+                Check("G4裁判-正確: A 計分(_matchScores[Andi]=1)", g.MatchScoreOf("Andi") == 1);
+                Check("G4裁判-正確: 轉頭面向 B 可達(Faced)", r.Faced);
+                Check("G4裁判-正確: 不污染舊 Score", g.Score == 0);
+            }
+
+            // ── 2) 裁判賽-錯誤：A 說 "di kiri" 但 B 真值 DOA=90(Kanan) → Correct=false、A 不得分 ──
+            {
+                var g = Calibrated(out var body, out var voice);
+                body.CurrentDoa = 90f; voice.EnqueueHeard("Budi di kiri");
+                var r = g.JudgeRoundAsync(new TebakArahGame.MatchSpec("Andi", "Budi")).GetAwaiter().GetResult();
+                Check("G4裁判-錯誤: Correct=false", !r.Correct);
+                Check("G4裁判-錯誤: A 不得分", g.MatchScoreOf("Andi") == 0);
+            }
+
+            // ── 3) 裁判賽-頭夾限：B 在正後方 170° → 語言看對錯、但 Faced=false（沿用 KebbiHead 夾限）──
+            {
+                var g = Calibrated(out var body, out var voice);
+                body.CurrentDoa = 170f; voice.EnqueueHeard("Dewi di belakang");
+                var r = g.JudgeRoundAsync(new TebakArahGame.MatchSpec("Andi", "Dewi")).GetAwaiter().GetResult();
+                Check("G4裁判-夾限: 真值=Belakang", r.ActualSector == Dir.Belakang);
+                Check("G4裁判-夾限: 語言對仍 Correct", r.Correct);
+                Check("G4裁判-夾限: 頭轉不到正後方 Faced=false", !r.Faced);
+            }
+
+            // ── 4) 視角純函式-基本：RelativeDir(observer=0/前, target=90/右) → 觀察者面向 Kebbi 時 target 在其 Kiri ──
+            Check("G4視角-Basic: RelativeDir(0,90)=Kiri(我的右=Kebbi的左)", TebakArahGame.RelativeDir(0f, 90f) == Dir.Kiri);
+            // ── 5) 視角純函式-同位：RelativeDir(90,90) → Depan(重合扇區) ──
+            Check("G4視角-SameSpot: RelativeDir(90,90)=Depan", TebakArahGame.RelativeDir(90f, 90f) == Dir.Depan);
+            // ── 6) 視角純函式-釘住約定：observer=0 時 RelativeDir(0,X) 應等同 FromAngle(-X) ──
+            {
+                bool roundTrip = true;
+                foreach (float x in DoaSeq(0f, 30f, 90f, -90f, 135f, 170f))
+                    if (TebakArahGame.RelativeDir(0f, x) != Direction.FromAngle(-x)) roundTrip = false;
+                Check("G4視角-RoundTripVsKebbi: observer=0 → RelativeDir(0,X)==FromAngle(-X)", roundTrip);
+            }
+
+            // ── 7) 視角題-兩者皆對：A(Citra 前0°) 描述 B(Andi 右90°)；B 相對 Kebbi=Kanan、相對 A=Kiri；兩詞皆對 → 得分 ──
+            {
+                var g = Calibrated(out _, out var voice);
+                voice.EnqueueHeard("di kanan");  // 相對 Kebbi（先答）
+                voice.EnqueueHeard("di kiri");   // 相對自己（後答）
+                var r = g.PerspectiveRoundAsync("Citra", "Andi").GetAwaiter().GetResult();
+                Check("G4視角題-兩對: 相對Kebbi真值=Kanan", r.ActualSector == Dir.Kanan);
+                Check("G4視角題-兩對: 相對A真值=Kiri", r.PerspectiveSector == Dir.Kiri);
+                Check("G4視角題-兩對: Correct=true 且 A 計分", r.Correct && g.MatchScoreOf("Citra") == 1);
+            }
+
+            // ── 8) 視角題-講反：A 把『相對自己』與『相對 Kebbi』講反 → 只對一半 → 不得分 ──
+            {
+                var g = Calibrated(out _, out var voice);
+                voice.EnqueueHeard("di kiri");   // 相對 Kebbi 應為 Kanan → 錯
+                voice.EnqueueHeard("di kanan");  // 相對自己 應為 Kiri → 錯
+                var r = g.PerspectiveRoundAsync("Citra", "Andi").GetAwaiter().GetResult();
+                Check("G4視角題-講反: Correct=false", !r.Correct);
+                Check("G4視角題-講反: 不得分", g.MatchScoreOf("Citra") == 0);
+            }
+
+            // ── 9) 多輪排名：B 全對、A 半對、C 全錯 → Ranking[0]=B、降冪正確 ──
+            // 用「可逐場腳本化」的身體與語音：每場各自的 DOA 真值與 A 的方位詞。
+            {
+                var g = Calibrated(out var body, out var voice);
+                // 三人 round-robin（A,B,C）共 3 場：A→B、A→C、B→C（MakeRoundRobin 前者為提問者）。
+                var matches = TebakArahGame.MakeRoundRobin(new[] { "A", "B", "C" });
+                Check("G4排名-round-robin 3 人=3 場", matches.Count == 3);
+
+                // 用獨立的記錄身體逐場餵 DOA；語音逐場餵方位詞，使 A 半對、B 全對、C 全錯。
+                var seqBody = new SeqDoaBody();
+                var seqVoice = new SimVoice(_ => { });
+                var ctx2 = new KebbiContext(seqBody, seqVoice, new SimLlm(_ => { }), _ => { });
+                var g2 = new TebakArahGame(ctx2);
+                // 校準 A,B,C（座位隨意，排名只看 _matchScores）。
+                void Cal2(string n, float a) { seqBody.Next = a; seqVoice.EnqueueHeard("Saya di sini!"); g2.CalibrateOneAsync(n).GetAwaiter().GetResult(); }
+                Cal2("A", 90f); Cal2("B", -90f); Cal2("C", 0f);
+
+                // 場1 A→B：DOA=90(Kanan)，A 答 "kanan" → 對（A 提問者得分）
+                // 場2 A→C：DOA=0(Depan)，A 答 "kiri" → 錯（A 不得分）→ A 半對(1/2)
+                // 場3 B→C：DOA=0(Depan)，B 答 "depan" → 對（B 得分）→ B 全對(1/1)
+                // C 從未當提問者 → C 0 分（全錯/沒分）
+                seqBody.Queue(90f); seqVoice.EnqueueHeard("kanan");
+                seqBody.Queue(0f); seqVoice.EnqueueHeard("kiri");
+                seqBody.Queue(0f); seqVoice.EnqueueHeard("depan");
+                g2.RunTournamentAsync(matches).GetAwaiter().GetResult();
+                Check("G4排名-跑了 3 場", g2.TournamentRounds == 3);
+                Check("G4排名-A 半對得 1 分", g2.MatchScoreOf("A") == 1);
+                Check("G4排名-B 全對得 1 分", g2.MatchScoreOf("B") == 1);
+                Check("G4排名-C 全錯得 0 分", g2.MatchScoreOf("C") == 0);
+                Check("G4排名-降冪: 末位是 C(0 分)", g2.Ranking[g2.Ranking.Count - 1].Name == "C" && g2.Ranking[g2.Ranking.Count - 1].Points == 0);
+                Check("G4排名-降冪: 榜首分數最高", g2.Ranking[0].Points >= g2.Ranking[1].Points);
+                Check("G4排名-不污染舊 Score", g2.Score == 0);
+            }
+
+            // ── 10) 平手 stable：兩人同分 → 名次以校準先後排序（先校準者在前）──
+            {
+                var seqBody = new SeqDoaBody();
+                var seqVoice = new SimVoice(_ => { });
+                var g = new TebakArahGame(new KebbiContext(seqBody, seqVoice, new SimLlm(_ => { }), _ => { }));
+                void Cal(string n, float a) { seqBody.Next = a; seqVoice.EnqueueHeard("Saya di sini!"); g.CalibrateOneAsync(n).GetAwaiter().GetResult(); }
+                Cal("First", 0f); Cal("Second", 0f);  // 校準順序：First 先、Second 後
+                var matches = new System.Collections.Generic.List<TebakArahGame.MatchSpec> {
+                    new TebakArahGame.MatchSpec("First", "Second"),
+                    new TebakArahGame.MatchSpec("Second", "First"),
+                };
+                // 兩場都答對 → First、Second 各 1 分（平手）。
+                seqBody.Queue(0f); seqVoice.EnqueueHeard("depan");
+                seqBody.Queue(0f); seqVoice.EnqueueHeard("depan");
+                g.RunTournamentAsync(matches).GetAwaiter().GetResult();
+                Check("G4平手-兩人同分(各1分)", g.MatchScoreOf("First") == 1 && g.MatchScoreOf("Second") == 1);
+                Check("G4平手-stable: 先校準者(First)排前", g.Ranking[0].Name == "First" && g.Ranking[1].Name == "Second");
+            }
+
+            // ── 11) 可重入：同實例連跑兩場 RunTournamentAsync → 第二場 _matchScores/TournamentRounds/Ranking 歸零不累加 ──
+            {
+                var seqBody = new SeqDoaBody();
+                var seqVoice = new SimVoice(_ => { });
+                var g = new TebakArahGame(new KebbiContext(seqBody, seqVoice, new SimLlm(_ => { }), _ => { }));
+                void Cal(string n, float a) { seqBody.Next = a; seqVoice.EnqueueHeard("Saya di sini!"); g.CalibrateOneAsync(n).GetAwaiter().GetResult(); }
+                Cal("X", 90f); Cal("Y", -90f);
+                var matches = new System.Collections.Generic.List<TebakArahGame.MatchSpec> {
+                    new TebakArahGame.MatchSpec("X", "Y"),
+                };
+                seqBody.Queue(-90f); seqVoice.EnqueueHeard("kiri"); // X→Y, Y 在左 → 對
+                g.RunTournamentAsync(matches).GetAwaiter().GetResult();
+                Check("G4可重入-第一場: X 得 1 分、1 輪", g.MatchScoreOf("X") == 1 && g.TournamentRounds == 1);
+                seqBody.Queue(-90f); seqVoice.EnqueueHeard("kiri");
+                g.RunTournamentAsync(matches).GetAwaiter().GetResult();
+                Check("G4可重入-第二場歸零不累加(X 仍 1、TournamentRounds 仍 1)", g.MatchScoreOf("X") == 1 && g.TournamentRounds == 1);
+            }
+
+            // ── 12) 向後相容：跑完整場 Tournament 後，舊 Score 仍為 0（裁判分只進 _matchScores）──
+            {
+                var seqBody = new SeqDoaBody();
+                var seqVoice = new SimVoice(_ => { });
+                var g = new TebakArahGame(new KebbiContext(seqBody, seqVoice, new SimLlm(_ => { }), _ => { }));
+                void Cal(string n, float a) { seqBody.Next = a; seqVoice.EnqueueHeard("Saya di sini!"); g.CalibrateOneAsync(n).GetAwaiter().GetResult(); }
+                Cal("P", 90f); Cal("Q", -90f);
+                seqBody.Queue(-90f); seqVoice.EnqueueHeard("kiri");
+                g.RunTournamentAsync(new System.Collections.Generic.List<TebakArahGame.MatchSpec> {
+                    new TebakArahGame.MatchSpec("P", "Q") }).GetAwaiter().GetResult();
+                Check("G4向後相容-Tournament 後舊 Score 仍 0", g.Score == 0 && g.Rounds == 0);
+            }
+        }
+
+        // 可逐場腳本化 DOA 的記錄式身體：給 G4 tournament 多場各自真值（ReadDoaDegrees 依序回傳預排角度）。
+        // 保留 NeckZ ±90 夾限語意，與 SimKebbiBody 一致。
+        private sealed class SeqDoaBody : IKebbiBody
+        {
+            private readonly System.Collections.Generic.Dictionary<KebbiMotor, float> _m
+                = new System.Collections.Generic.Dictionary<KebbiMotor, float>();
+            private readonly System.Collections.Generic.Queue<float> _doa = new System.Collections.Generic.Queue<float>();
+            public float Next = 0f;                  // 校準階段用：下次 ReadDoaDegrees 回傳值（無佇列時）
+            public void Queue(float deg) => _doa.Enqueue(deg);
+            public void SetMotor(KebbiMotor m, float d, float s = 50f) { _m[m] = d; }
+            public float GetMotor(KebbiMotor m) => _m.TryGetValue(m, out var v) ? v : 0f;
+            public float ReadDoaDegrees() => _doa.Count > 0 ? _doa.Dequeue() : Next;
+            public bool CanMove => false;
+            public void Move(float mps) { }
+            public void Turn(float dps) { }
+            public void StopWheels() { }
+            public float NeckZMinDeg => -90f;
+            public float NeckZMaxDeg => 90f;
+        }
+
+        // G3-rewind:逐幀播放 + currentFrame 索引 + RewindOneFrame/HandleAgainAsync(喊「再一次」回退一幀重示範,手冊 step4)。
+        // 驗:逐幀化未改對外行為(末幀歸位)、HandleAgainAsync 真的回退並重送前一幀角度、首幀夾住、未開始不丟例外、
+        //     RewindOneFrame 純狀態夾限、可重入重置索引,以及 RunRepAsync 內「再一次」攔截(注入才觸發、空佇列向後相容)。
+        private static void T_G3_Rewind()
+        {
+            Action<string> noop = _ => { };
+
+            // (1) 逐幀化未改對外行為:PlayMoveAsync(暖身,3 幀)後 CurrentMove==move、CurrentFrame==2(停末幀)、雙肩歸位 0°
+            var ctx1 = SilentSim(out var body1, out _);
+            var pose1 = new SimPoseSensor(noop);
+            var g1 = new App.MirrorCoachGame(ctx1, pose1);
+            var move1 = App.MirrorCoachGame.MakeWarmup();
+            g1.PlayMoveAsync(move1).GetAwaiter().GetResult();
+            Check("G3rewind-逐幀:CurrentMove==move", ReferenceEquals(g1.CurrentMove, move1));
+            Check("G3rewind-逐幀:停在末幀索引 2(共 3 幀)", g1.CurrentFrame == 2);
+            Check("G3rewind-逐幀:末幀 RShoulderY 仍歸位 0°", Math.Abs(body1.GetMotor(KebbiMotor.RShoulderY) - 0f) < 0.01f);
+            Check("G3rewind-逐幀:末幀 LShoulderY 仍歸位 0°", Math.Abs(body1.GetMotor(KebbiMotor.LShoulderY) - 0f) < 0.01f);
+
+            // (2) HandleAgainAsync 在末幀(2)→ 回 true、CurrentFrame 退到 1、中間幀「雙臂平舉」80° 被重送
+            bool r2 = g1.HandleAgainAsync().GetAwaiter().GetResult();
+            Check("G3rewind-末幀 HandleAgain 回 true(有回退)", r2);
+            Check("G3rewind-HandleAgain 後 CurrentFrame 退到 1", g1.CurrentFrame == 1);
+            Check("G3rewind-中間幀角度被重送(RShoulderY≈80)", Math.Abs(body1.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+
+            // (3) 連續再呼叫兩次:1→0(true),已在首幀(false,夾住),且首幀角度 0° 被重送
+            bool r3a = g1.HandleAgainAsync().GetAwaiter().GetResult();
+            Check("G3rewind-再 HandleAgain:1→0 回 true", r3a && g1.CurrentFrame == 0);
+            bool r3b = g1.HandleAgainAsync().GetAwaiter().GetResult();
+            Check("G3rewind-首幀 HandleAgain 回 false(夾住停 0)", !r3b && g1.CurrentFrame == 0);
+            Check("G3rewind-首幀角度 0° 被重送", Math.Abs(body1.GetMotor(KebbiMotor.RShoulderY) - 0f) < 0.01f);
+
+            // (4) 未開始(剛 new、CurrentFrame==-1、CurrentMove==null)直接 HandleAgainAsync → 回 false、不丟例外、CurrentFrame 仍 -1
+            var g4 = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+            Check("G3rewind-未開始:CurrentFrame==-1、CurrentMove==null", g4.CurrentFrame == -1 && g4.CurrentMove == null);
+            bool r4 = g4.HandleAgainAsync().GetAwaiter().GetResult();
+            Check("G3rewind-未開始 HandleAgain 回 false、不丟例外、CurrentFrame 仍 -1", !r4 && g4.CurrentFrame == -1);
+
+            // (5) RewindOneFrame 純狀態:PlayMoveAsync 到末幀(2),連呼三次 → true(→1)、true(→0)、false(停 0)
+            var g5 = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+            g5.PlayMoveAsync(App.MirrorCoachGame.MakeWarmup()).GetAwaiter().GetResult();
+            Check("G3rewind-RewindOneFrame:2→1 回 true", g5.RewindOneFrame() && g5.CurrentFrame == 1);
+            Check("G3rewind-RewindOneFrame:1→0 回 true", g5.RewindOneFrame() && g5.CurrentFrame == 0);
+            Check("G3rewind-RewindOneFrame:首幀回 false(夾住停 0)", !g5.RewindOneFrame() && g5.CurrentFrame == 0);
+
+            // (6) 可重入:同實例第二次 PlayMoveAsync → CurrentFrame 重置為 2(非沿用上次回退後的 0)
+            g5.PlayMoveAsync(App.MirrorCoachGame.MakeWarmup()).GetAwaiter().GetResult();
+            Check("G3rewind-可重入:第二次 PlayMoveAsync 後 CurrentFrame 重置為 2", g5.CurrentFrame == 2);
+
+            // (7) RunRepAsync 走姿態錯誤分支 + 事先注入「再一次」→ 觸發 HandleAgainAsync 重示範(末幀 2 退到 1)
+            var ctx7 = SilentSim(out _, out var voice7);
+            var pose7 = new SimPoseSensor(noop);
+            var g7 = new App.MirrorCoachGame(ctx7, pose7);
+            pose7.Enqueue(false);                  // 姿態錯誤 → 進 else 分支
+            voice7.EnqueueHeard("再一次");          // 注入學生喊「再一次」
+            g7.RunRepAsync(App.MirrorCoachGame.MakeWarmup()).GetAwaiter().GetResult();
+            Check("G3rewind-RunRep 攔截:注入『再一次』→ HandleAgain 重示範(CurrentFrame 退到 1)", g7.CurrentFrame == 1);
+
+            // (8) RunRepAsync 姿態錯誤但『不』注入「再一次」(佇列空 ListenAsync 回空字串)→ 不觸發、CurrentFrame 仍停末幀 2
+            var pose8 = new SimPoseSensor(noop);
+            var g8 = new App.MirrorCoachGame(SilentSim(out _, out _), pose8);
+            pose8.Enqueue(false);                  // 姿態錯誤,但不注入語音
+            g8.RunRepAsync(App.MirrorCoachGame.MakeWarmup()).GetAwaiter().GetResult();
+            Check("G3rewind-向後相容:沒注入『再一次』→ 不誤觸發、CurrentFrame 仍停末幀 2", g8.CurrentFrame == 2);
+        }
+
+        // G2 學生自編走位腳本「結構驗證器」:ValidateScript 對證明步驟序列把關
+        // (缺步/多步/層次錯置/順序逆置/缺標層),通過才放行 RunProofIfValidAsync 接力。
+        // 純加法、向後相容:既有 RunProofAsync 不經 validator 仍可直接跑。
+        private static void T_G2_Validator()
+        {
+            Action<string> noop = _ => { };
+
+            // 標準解(等腰底角學習單版):3 步,Layer 序列 = 已知/因為/所以。
+            var expected = App.GeometryRelayGame.MakeIsoscelesProofWorksheet();
+
+            // 以標準解為基底複製一份學生腳本(深拷貝 Step,改 Layer 時不污染標準解)。
+            System.Func<App.GeometryRelayGame.Step, App.GeometryRelayGame.Step> copy =
+                s => new App.GeometryRelayGame.Step(s.Reason, s.Edge, s.ArmAngle, s.Layer);
+            System.Func<System.Collections.Generic.List<App.GeometryRelayGame.Step>> clone =
+                () => { var l = new System.Collections.Generic.List<App.GeometryRelayGame.Step>();
+                        foreach (var s in expected) l.Add(copy(s)); return l; };
+
+            // 1) 標準解通過。
+            var okChk = App.GeometryRelayGame.ValidateScript(App.GeometryRelayGame.MakeIsoscelesProofWorksheet(), expected);
+            Check("G2腳本-標準解通過(Ok=true、Error=None)",
+                okChk.Ok && okChk.Error == App.GeometryRelayGame.ScriptError.None);
+
+            // 2) 缺步:只給前 2 步 → MissingStep、指第 3 步。
+            var missing = clone(); missing.RemoveAt(2);
+            var mChk = App.GeometryRelayGame.ValidateScript(missing, expected);
+            Check("G2腳本-缺步:Error=MissingStep、Step=3",
+                !mChk.Ok && mChk.Error == App.GeometryRelayGame.ScriptError.MissingStep && mChk.Step == 3);
+
+            // 3) 多步:標準解 3 步再 append 一步 → ExtraStep、指第 4 步。
+            var extra = clone(); extra.Add(copy(expected[2]));
+            var eChk = App.GeometryRelayGame.ValidateScript(extra, expected);
+            Check("G2腳本-多步:Error=ExtraStep、Step=4",
+                !eChk.Ok && eChk.Error == App.GeometryRelayGame.ScriptError.ExtraStep && eChk.Step == 4);
+
+            // 4) 層次錯置:第 2 步 Layer『因為』改成『所以』(不造成倒退,故走 WrongLayer)。
+            var wrongLayer = clone(); wrongLayer[1].Layer = "所以";
+            var wlChk = App.GeometryRelayGame.ValidateScript(wrongLayer, expected);
+            Check("G2腳本-層次錯置:Error=WrongLayer、Step=2、訊息含『應為『因為』』",
+                !wlChk.Ok && wlChk.Error == App.GeometryRelayGame.ScriptError.WrongLayer
+                && wlChk.Step == 2 && wlChk.Message.Contains("應為『因為』"));
+
+            // 5) 順序逆置:把第 2(因為)與第 3(所以)步整步對調 → 第 2 步變『所以』、第 3 步變『因為』,
+            //    第 3 步層次從『所以』倒退回『因為』被攔(WrongOrder),但題庫單線性解下第 2 步已先被 WrongLayer 攔。
+            //    依規格此案可接受 WrongOrder 或 WrongLayer,且都指第 2 步。
+            var swapped = clone();
+            var tmp = swapped[1]; swapped[1] = swapped[2]; swapped[2] = tmp;
+            var sChk = App.GeometryRelayGame.ValidateScript(swapped, expected);
+            Check("G2腳本-順序逆置:Error=WrongOrder 或 WrongLayer、Step=2",
+                !sChk.Ok && sChk.Step == 2
+                && (sChk.Error == App.GeometryRelayGame.ScriptError.WrongOrder
+                    || sChk.Error == App.GeometryRelayGame.ScriptError.WrongLayer));
+
+            // 5b) 純逆序攔截:用一份「同層可重複」的標準解(已知→因為→因為),學生在第 3 步把層次倒退回『已知』
+            //     → 在比對 WrongLayer 之前先被 WrongOrder(層次單調遞增) 攔下、指第 3 步。釘住「層次不可倒退」語意。
+            var monoExpected = new System.Collections.Generic.List<App.GeometryRelayGame.Step>
+            {
+                new App.GeometryRelayGame.Step("已知條件", "AB", 60f, "已知"),
+                new App.GeometryRelayGame.Step("推論一", "AD", 30f, "因為"),
+                new App.GeometryRelayGame.Step("推論二", "CD", 40f, "因為"),
+            };
+            var orderBad = new System.Collections.Generic.List<App.GeometryRelayGame.Step>
+            {
+                new App.GeometryRelayGame.Step("已知條件", "AB", 60f, "已知"),
+                new App.GeometryRelayGame.Step("推論一", "AD", 30f, "因為"),
+                new App.GeometryRelayGame.Step("倒退回已知", "CD", 40f, "已知"), // 第 3 步層次倒退
+            };
+            var obChk = App.GeometryRelayGame.ValidateScript(orderBad, monoExpected);
+            Check("G2腳本-層次倒退攔截:Error=WrongOrder、Step=3",
+                !obChk.Ok && obChk.Error == App.GeometryRelayGame.ScriptError.WrongOrder && obChk.Step == 3);
+
+            // 6) 缺標層:某步 Layer 設為 null → MissingLayer、指該步號。
+            var noLayer = clone(); noLayer[1].Layer = null;
+            var nlChk = App.GeometryRelayGame.ValidateScript(noLayer, expected);
+            Check("G2腳本-缺標層:Error=MissingLayer、Step=2",
+                !nlChk.Ok && nlChk.Error == App.GeometryRelayGame.ScriptError.MissingLayer && nlChk.Step == 2);
+
+            // 7) 通過才接力:RunProofIfValidAsync(正確腳本) → Ok=true 且 StepsDone==3。
+            var bus = new SimRobotBus(noop);
+            var voice = new SimVoice(noop);
+            voice.EnqueueHeard("已知"); voice.EnqueueHeard("因為"); voice.EnqueueHeard("所以"); // 學習單作答
+            var game = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus.CreateLink("甲機"), bus.CreateLink("乙機"), voice, noop);
+            var runOk = game.RunProofIfValidAsync(App.GeometryRelayGame.MakeIsoscelesProofWorksheet(), expected)
+                            .GetAwaiter().GetResult();
+            Check("G2腳本-通過才接力:Ok=true、StepsDone=3", runOk.Ok && game.StepsDone == 3);
+
+            // 8) 不過不接力:RunProofIfValidAsync(缺步腳本) → Ok=false 且 StepsDone==0(沒跑接力)。
+            var bus2 = new SimRobotBus(noop);
+            var game2 = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus2.CreateLink("甲機"), bus2.CreateLink("乙機"), new SimVoice(noop), noop);
+            var badStudent = App.GeometryRelayGame.MakeIsoscelesProofWorksheet();
+            badStudent.RemoveAt(2); // 只剩 2 步
+            var runBad = game2.RunProofIfValidAsync(badStudent, expected).GetAwaiter().GetResult();
+            Check("G2腳本-不過不接力:Ok=false、StepsDone=0",
+                !runBad.Ok && game2.StepsDone == 0);
+
+            // 9) 向後相容:既有 RunProofAsync 不經 validator 仍可直接跑、StepsDone==3。
+            var bus3 = new SimRobotBus(noop);
+            var game3 = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus3.CreateLink("甲機"), bus3.CreateLink("乙機"), new SimVoice(noop), noop);
+            game3.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProof()).GetAwaiter().GetResult();
+            Check("G2腳本-向後相容:RunProofAsync 直接跑 StepsDone=3", game3.StepsDone == 3);
+
+            // 10) null 輸入不丟例外:ValidateScript(null, expected) → Ok=false、MissingStep。
+            var nullChk = App.GeometryRelayGame.ValidateScript(null, expected);
+            Check("G2腳本-null 輸入不丟例外:Ok=false、Error=MissingStep",
+                !nullChk.Ok && nullChk.Error == App.GeometryRelayGame.ScriptError.MissingStep);
+        }
+
     }
 }

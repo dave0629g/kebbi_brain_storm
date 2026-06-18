@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using KebbiBrain.Hardware;
 
@@ -133,6 +134,213 @@ namespace KebbiBrain.App
         {
             _ctx.Log("");
             _ctx.Log($"=== 結算：答對 {Score} / {Rounds} 題 ===");
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // G4-judge 擴充：裁判賽（JudgeMatch）+ 視角轉換（PerspectiveRound）+ 多輪排名（Tournament）
+        // 全部純加法、向後相容：舊 Score/Rounds/ForwardRoundAsync/ReverseRoundAsync 一字不改；
+        // 裁判賽分數只進獨立的 _matchScores 字典 + TournamentRounds，絕不污染舊 Score。
+        // ══════════════════════════════════════════════════════════════════════════════
+
+        // 累積排名用獨立欄位（與舊 Score 完全隔離）。
+        private readonly Dictionary<string, int> _matchScores = new Dictionary<string, int>();
+        public int TournamentRounds { get; private set; }
+        public IReadOnlyList<RankEntry> Ranking { get; private set; } = new List<RankEntry>();
+
+        // 排名項目（LangVersion 9.0：用 class 而非 record；公開簽章不用 tuple/target-typed new）。
+        public sealed class RankEntry
+        {
+            public string Name;
+            public int Points;
+            public RankEntry(string name, int points) { Name = name; Points = points; }
+        }
+
+        // 一場裁判賽腳本：誰是提問者（描述者）、誰被描述。
+        public sealed class MatchSpec
+        {
+            public string AskerName;
+            public string TargetName;
+            public MatchSpec(string asker, string target) { AskerName = asker; TargetName = target; }
+        }
+
+        // 裁判賽/視角題結果。
+        public sealed class JudgeResult
+        {
+            public string Asker;
+            public string Target;
+            public Dir? Claimed;           // A 說 B 相對 Kebbi 在哪
+            public Dir ActualSector;       // DOA 真值（B 相對 Kebbi 的扇區）
+            public Dir? ClaimedFromAsker;  // 視角題：A 說 B「相對自己」在哪（裁判賽=null）
+            public Dir PerspectiveSector;  // 視角題：B 相對 A 的真值扇區（裁判賽=ActualSector）
+            public bool Correct;           // 是否得分（裁判賽=方位對；視角題=兩個方位都要對）
+            public bool Faced;             // Kebbi 轉頭面向 B 是否可達（false=被夾限，如正後方）
+            public float FacedAngle;
+        }
+
+        // ── 視角轉換純函式（無狀態、最易測）──
+        // observerDeg=觀察者相對 Kebbi 的角度；targetDeg=被描述者相對 Kebbi 的角度。
+        // 約定：觀察者「面向 Kebbi」（背對自己座位）→ 其前=朝 Kebbi、左右相對觀察者翻轉。
+        // 故手冊核心句『我的右＝Kebbi 的左』：rel = -(target - observer) 正規化後再分扇區。
+        public static Dir RelativeDir(float observerDeg, float targetDeg)
+        {
+            float rel = Direction.Normalize(-(targetDeg - observerDeg));
+            return Direction.FromAngle(rel);
+        }
+
+        // 取某學生在 _matchScores 的累積分（LangVersion 9.0 安全：用 TryGetValue，Unity Mono 也可搬）。
+        public int MatchScoreOf(string name)
+        {
+            return _matchScores.TryGetValue(name, out var v) ? v : 0;
+        }
+
+        private void AddMatchScore(string name)
+        {
+            _matchScores[name] = MatchScoreOf(name) + 1;
+        }
+
+        // ── 單場裁判賽：A 出聲描述 B 相對 Kebbi 的方位 → Kebbi 用 B 的 DOA 真值核對 → 轉頭面向 B ──
+        // （Sim：呼叫前由腳本設定 body.CurrentDoa＝B 此刻方位、EnqueueHeard A 的答案；Real：B 真的出聲被 DOA 量到）
+        public async Task<JudgeResult> JudgeRoundAsync(MatchSpec m)
+        {
+            TournamentRounds++;
+            await _ctx.Voice.SpeakAsync($"{m.AskerName}, di mana {m.TargetName}?", "id-ID");
+            string spoken = await _ctx.Voice.ListenAsync("id-ID");
+            Dir? claimed = Direction.ParseIndo(spoken);
+
+            float doa = _ctx.Body.ReadDoaDegrees();      // B 此刻出聲 → 真值
+            Dir actual = Direction.FromAngle(doa);
+            float faced = KebbiHead.TurnToward(_ctx.Body, doa, out bool reachable);
+
+            bool correct = claimed.HasValue && claimed.Value == actual;
+            if (correct)
+            {
+                AddMatchScore(m.AskerName);
+                await _ctx.Voice.SpeakAsync("Benar! Bagus!", "id-ID");
+            }
+            else
+            {
+                await _ctx.Voice.SpeakAsync(
+                    $"Salah. {m.TargetName} sebenarnya di {Direction.ToIndo(actual)}.", "id-ID");
+            }
+
+            return new JudgeResult
+            {
+                Asker = m.AskerName,
+                Target = m.TargetName,
+                Claimed = claimed,
+                ActualSector = actual,
+                ClaimedFromAsker = null,
+                PerspectiveSector = actual,
+                Correct = correct,
+                Faced = reachable,
+                FacedAngle = faced
+            };
+        }
+
+        // ── 視角轉換題：要求 A 同時說出 B『相對 Kebbi』與『相對自己』的方位 ──
+        // 教學重點：兩者常相反（手冊 `Kamu di kiri saya, tapi di kanan Kebbi`）。
+        // 兩個方位詞都對才得分；任一錯（含把兩者講反）皆不得分。
+        // 兩答案由腳本依序 EnqueueHeard：先『相對 Kebbi』、後『相對自己』。
+        public async Task<JudgeResult> PerspectiveRoundAsync(string askerName, string targetName)
+        {
+            TournamentRounds++;
+            var asker = FindByName(askerName);
+            var target = FindByName(targetName);
+
+            Dir fromKebbi = target != null ? target.Dir : Dir.Depan;     // B 相對 Kebbi 真值
+            Dir fromAsker = (asker != null && target != null)
+                ? RelativeDir(asker.AngleDeg, target.AngleDeg)           // B 相對 A 視角真值
+                : Dir.Depan;
+
+            // 出題：先問相對 Kebbi、再問相對自己。
+            await _ctx.Voice.SpeakAsync(
+                $"{askerName}, di mana {targetName} dari Kebbi, dan dari kamu?", "id-ID");
+            string spokenKebbi = await _ctx.Voice.ListenAsync("id-ID");
+            string spokenAsker = await _ctx.Voice.ListenAsync("id-ID");
+            Dir? claimedKebbi = Direction.ParseIndo(spokenKebbi);
+            Dir? claimedAsker = Direction.ParseIndo(spokenAsker);
+
+            // 轉頭面向 B（具身回饋；真值用校準時的座位方位）。
+            bool reach;
+            float faced = target != null
+                ? KebbiHead.TurnToward(_ctx.Body, target.AngleDeg, out reach)
+                : KebbiHead.TurnToward(_ctx.Body, 0f, out reach);
+
+            bool kebbiOk = claimedKebbi.HasValue && claimedKebbi.Value == fromKebbi;
+            bool askerOk = claimedAsker.HasValue && claimedAsker.Value == fromAsker;
+            bool correct = kebbiOk && askerOk;
+            if (correct)
+            {
+                AddMatchScore(askerName);
+                await _ctx.Voice.SpeakAsync("Benar! Kamu mengerti sudut pandang!", "id-ID");
+            }
+            else
+            {
+                await _ctx.Voice.SpeakAsync(
+                    $"Coba lagi. {targetName} di {Direction.ToIndo(fromKebbi)} dari Kebbi, " +
+                    $"tapi di {Direction.ToIndo(fromAsker)} dari kamu.", "id-ID");
+            }
+
+            return new JudgeResult
+            {
+                Asker = askerName,
+                Target = targetName,
+                Claimed = claimedKebbi,
+                ActualSector = fromKebbi,
+                ClaimedFromAsker = claimedAsker,
+                PerspectiveSector = fromAsker,
+                Correct = correct,
+                Faced = reach,
+                FacedAngle = faced
+            };
+        }
+
+        // ── 多輪賽事：逐場跑裁判賽、累加 per-match 分數，結束輸出降冪排名 ──
+        // 可重入慣例：開頭重置該場累積分／輪數／名次（仿 RunDebateAsync）。
+        public async Task RunTournamentAsync(List<MatchSpec> matches)
+        {
+            _matchScores.Clear();
+            TournamentRounds = 0;
+            Ranking = new List<RankEntry>();
+
+            if (matches != null)
+                foreach (var m in matches)
+                    await JudgeRoundAsync(m);
+
+            // 平手以校準先後 stable（LINQ OrderByDescending 為 stable）。
+            Ranking = _students
+                .Select(s => new RankEntry(s.Name, MatchScoreOf(s.Name)))
+                .OrderByDescending(x => x.Points)
+                .ToList();
+        }
+
+        // 印名次 1./2./3.；冠軍機器人舉手致意。
+        public void PrintRanking()
+        {
+            _ctx.Log("");
+            _ctx.Log($"=== 裁判賽排名（{TournamentRounds} 場）===");
+            int rank = 1;
+            foreach (var e in Ranking)
+            {
+                _ctx.Log($"   {rank}. {e.Name}：{e.Points} 分");
+                rank++;
+            }
+            if (Ranking.Count > 0 && Ranking[0].Points > 0)
+            {
+                _ctx.Body.SetMotor(KebbiMotor.RShoulderY, 100f);
+                _ctx.Log($"   🏆 冠軍 {Ranking[0].Name}，Kebbi 舉手致意！");
+            }
+        }
+
+        // 便利：把一串學生名兩兩配對成 round-robin 裁判賽（每對只配一次，前者為提問者）。
+        public static List<MatchSpec> MakeRoundRobin(IEnumerable<string> names)
+        {
+            var list = new List<string>(names ?? Array.Empty<string>());
+            var matches = new List<MatchSpec>();
+            for (int i = 0; i < list.Count; i++)
+                for (int j = i + 1; j < list.Count; j++)
+                    matches.Add(new MatchSpec(list[i], list[j]));
+            return matches;
         }
     }
 }

@@ -19,6 +19,14 @@ namespace KebbiBrain.App
         public int Score { get; private set; }
         public int Reps { get; private set; }
 
+        // G3-rewind:逐幀播放狀態。CurrentFrame=目前停留幀(-1=尚未開始);CurrentMove=目前示範的動作(null=未開始)。
+        // 兩者皆「該場示範狀態」(非累計類),PlayMoveAsync 開頭重置 → 可重入;對外唯讀。
+        public int CurrentFrame { get; private set; } = -1;
+        public Move CurrentMove { get; private set; }
+
+        // 觸發「再一次」的關鍵字(手冊 step4)。比對用 Contains,容錯口語。
+        private const string AgainPhrase = "再一次";
+
         public MirrorCoachGame(KebbiContext ctx, IPoseSensor pose) { _ctx = ctx; _pose = pose; }
 
         // 一個動作幀：標籤 + 一組(馬達, 角度)
@@ -70,16 +78,45 @@ namespace KebbiBrain.App
         // 內建課表：暖身 → 太極 → CPR（手冊運作流程 step5：完成一組語音切換下一組）。
         public static List<Move> MakeDefaultRoutine() => new List<Move> { MakeWarmup(), MakeTaichi(), MakeCpr() };
 
-        // 逐幀示範（依 BPM 決定每拍停留；不真的 sleep，以保持自測快速）
-        public async Task PlayMoveAsync(Move move)
+        // 抽出單幀播放（PlayMoveAsync 與 HandleAgainAsync 共用）：真正把該幀的(馬達,角度)送出 + Log + 設 CurrentFrame。
+        private void PlayFrame(Move move, int index)
         {
             int holdMs = (int)(60000.0 / Math.Max(1, Bpm));
+            var f = move.Frames[index];
+            foreach (var t in f.Targets) _ctx.Body.SetMotor(t.Key, t.Value);
+            CurrentFrame = index;                                // ← 索引前進(或回退重示範)到此幀
+            _ctx.Log("   🤸 [示範] (" + (index + 1) + "/" + move.Frames.Count + ") "
+                     + f.Label + "（停留 " + holdMs + "ms @ " + Bpm + " BPM）");
+        }
+
+        // 逐幀示範（依 BPM 決定每拍停留；不真的 sleep，以保持自測快速）。
+        // G3-rewind：重置場狀態 + for 迴圈逐幀呼叫 PlayFrame——對外行為完全等價舊版(仍播完整組、末幀手臂歸位)。可重入。
+        public async Task PlayMoveAsync(Move move)
+        {
+            CurrentMove = move; CurrentFrame = -1;               // 可重入：每組重置索引
             await _ctx.Voice.SpeakAsync("跟我做：" + move.Name + "（我的左手＝你的右手）", "zh-TW");
-            foreach (var f in move.Frames)
-            {
-                foreach (var t in f.Targets) _ctx.Body.SetMotor(t.Key, t.Value);
-                _ctx.Log("   🤸 [示範] " + f.Label + "（停留 " + holdMs + "ms @ " + Bpm + " BPM）");
-            }
+            for (int i = 0; i < move.Frames.Count; i++) PlayFrame(move, i);
+        }
+
+        // 純狀態回退一幀（無 I/O，可單測）。
+        // 回傳 true=有實際往回退；false=已在第 0 幀(夾住、停在 0)或尚未開始示範。
+        public bool RewindOneFrame()
+        {
+            if (CurrentMove == null || CurrentFrame < 0) return false;
+            if (CurrentFrame == 0) return false;                 // 已最前，夾住不越界
+            CurrentFrame--;
+            return true;
+        }
+
+        // 手冊 step4：喊「再一次」→ 回退一幀重示範。
+        // 回傳 true=有回退到前一幀；false=已在首幀(原地重做)或未開始。已開始時兩種情況都會重播當前幀(重送角度+安撫語音)。
+        public async Task<bool> HandleAgainAsync()
+        {
+            if (CurrentMove == null) return false;               // 還沒開始示範，無幀可重
+            bool rewound = RewindOneFrame();
+            await _ctx.Voice.SpeakAsync("好，我們再做一次這個動作，看我。", "zh-TW");
+            PlayFrame(CurrentMove, CurrentFrame);                // 重送該幀角度 + Log
+            return rewound;
         }
 
         // 跑一拍：示範 → 攝影機檢查學生姿態 → 計分/回饋
@@ -89,7 +126,14 @@ namespace KebbiBrain.App
             await PlayMoveAsync(move);
             bool ok = await _pose.CheckPoseAsync(move.Name);
             if (ok) { Score++; await _ctx.Voice.SpeakAsync("很好！動作很標準！", "zh-TW"); }
-            else { await _ctx.Voice.SpeakAsync("再一次，慢慢來，跟上我的手。", "zh-TW"); }
+            else
+            {
+                await _ctx.Voice.SpeakAsync("再一次，慢慢來，跟上我的手。", "zh-TW");
+                // 手冊 step4：免相機也能攔『再一次』——多看一次語音佇列。
+                // 向後相容：沒注入時 SimVoice.ListenAsync 回空字串 → Contains 為 false → 不觸發 HandleAgainAsync。
+                string heard = await _ctx.Voice.ListenAsync("zh-TW");
+                if (heard != null && heard.Contains(AgainPhrase)) await HandleAgainAsync();
+            }
             return ok;
         }
 

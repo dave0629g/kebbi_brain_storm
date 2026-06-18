@@ -156,5 +156,89 @@ namespace KebbiBrain.App
                 new Proof("三角形外角定理", MakeExteriorAngleProof()),
             };
         }
+
+        // ── G2 學生自編走位腳本驗證(純加法、向後相容)──────────────────────────
+        // 手冊命脈:學生把證明步驟序列(每步含邏輯層次 Layer=已知/因為/所以)排出來,
+        // ValidateScript 先「對結構把關」(順序錯置 / 缺步 / 多步 / 邏輯層次錯置 / 缺標層),
+        // 指出「第幾步」哪種錯;只有通過(Ok)才放行 RunProofAsync 接力。
+        // 純加法:新增 enum/巢狀型別/靜態純函式/便利重載,完全不動既有建構式、欄位與 RunProofAsync 簽章。
+
+        // 結構錯誤分類(對應手冊「順序/缺步/邏輯層次錯置」)。
+        public enum ScriptError { None, MissingStep, ExtraStep, WrongOrder, WrongLayer, MissingLayer }
+
+        // 驗證結果:Ok + 第幾步(1-based;缺步用「應有第 N 步但沒有」)+ 人類可讀訊息。
+        public sealed class ScriptCheck
+        {
+            public bool Ok;            // true=結構正確,可 RunProof
+            public ScriptError Error;  // 錯誤種類
+            public int Step;           // 出錯步號(1-based);0=整體缺步/無步驟
+            public string Message;     // 例「第 2 步邏輯層次錯置:應為『因為』,實際標成『所以』」
+            public ScriptCheck(bool ok, ScriptError e, int step, string msg)
+            { Ok = ok; Error = e; Step = step; Message = msg; }
+            public static ScriptCheck Pass() { return new ScriptCheck(true, ScriptError.None, 0, "結構正確,可開始接力"); }
+        }
+
+        // 邏輯層次的單調排序索引:已知=0 因為=1 所以=2(其餘=-1 視為缺/錯層)。
+        private static int LayerRank(string layer)
+        {
+            return layer == "已知" ? 0 : layer == "因為" ? 1 : layer == "所以" ? 2 : -1;
+        }
+
+        // 純函式 validator:逐步比對 student 與 expected(標準解)的 Layer 序列。
+        // 規則:
+        //   (a) student==null → MissingStep(整體沒步驟)。
+        //   (b) 步數須與標準解一致:少=MissingStep(指缺的第一步) / 多=ExtraStep(指多出的那步)。
+        //   (c) 逐步:每步須有合法 Layer(否則 MissingLayer);
+        //       層次不可從高倒退回低(已知→因為→所以 單調遞增,否則 WrongOrder);
+        //       對應位置 Layer 須與標準解相同(否則 WrongLayer)。
+        public static ScriptCheck ValidateScript(List<Step> student, List<Step> expected)
+        {
+            if (student == null)
+                return new ScriptCheck(false, ScriptError.MissingStep, 0, "沒有任何步驟");
+            int expectedCount = expected == null ? 0 : expected.Count;
+
+            // (b) 缺步 / 多步(以標準解步數為準)。
+            if (student.Count < expectedCount)
+                return new ScriptCheck(false, ScriptError.MissingStep, student.Count + 1,
+                    "缺步:應有 " + expectedCount + " 步,只給了 " + student.Count + " 步(缺第 " + (student.Count + 1) + " 步起)");
+            if (student.Count > expectedCount)
+                return new ScriptCheck(false, ScriptError.ExtraStep, expectedCount + 1,
+                    "多步:標準解 " + expectedCount + " 步,第 " + (expectedCount + 1) + " 步是多餘的");
+
+            // (c) 逐步:層次必須有、且與標準解一致;同時偵測層次逆序。
+            int prev = -1;
+            for (int i = 0; i < student.Count; i++)
+            {
+                string sl = student[i].Layer;
+                if (sl == null || LayerRank(sl) < 0)
+                    return new ScriptCheck(false, ScriptError.MissingLayer, i + 1,
+                        "第 " + (i + 1) + " 步未標邏輯層次(需『已知/因為/所以』)");
+                int r = LayerRank(sl);
+                if (r < prev)  // 例:第 2 步『所以』後第 3 步又回『因為』→ 層次逆序
+                    return new ScriptCheck(false, ScriptError.WrongOrder, i + 1,
+                        "第 " + (i + 1) + " 步順序錯置:邏輯層次不可從『" + LayerLabel(prev) + "』倒退回『" + sl + "』");
+                string el = expected[i].Layer;
+                if (sl != el)
+                    return new ScriptCheck(false, ScriptError.WrongLayer, i + 1,
+                        "第 " + (i + 1) + " 步邏輯層次錯置:應為『" + el + "』,實際標成『" + sl + "』");
+                prev = r;
+            }
+            return ScriptCheck.Pass();
+        }
+
+        private static string LayerLabel(int rank)
+        {
+            return rank == 0 ? "已知" : rank == 1 ? "因為" : rank == 2 ? "所以" : "(未標)";
+        }
+
+        // 便利重載:驗證通過才接力,並回報結果(demo/呼叫端用)。
+        // 不過 → 不跑 RunProofAsync(StepsDone 維持 0),只 log 提示;回傳 ScriptCheck 供呼叫端判斷。
+        public async Task<ScriptCheck> RunProofIfValidAsync(List<Step> student, List<Step> expected)
+        {
+            var chk = ValidateScript(student, expected);
+            if (chk.Ok) await RunProofAsync(student);   // 通過才執行既有接力
+            else _log("   ⛔ 腳本未通過驗證:" + chk.Message + "(請改好再接力)");
+            return chk;
+        }
     }
 }
