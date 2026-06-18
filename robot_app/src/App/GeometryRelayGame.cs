@@ -9,16 +9,20 @@ namespace KebbiBrain.App
     // G2《幾何證明接力站》核心邏輯：雙機「說—走—指—接棒」。
     // 乙機(reasoner)宣告每一步理由 → 用 IRobotLink 觸發甲機(guide)走位 + 手臂指向該邊/角 → 甲機回報 DONE → 乙機接下一步。
     // 平板免疫核心：移動到地面大圖對應位置 + 關節手臂指認 + 雙機接力(都是平板做不到的物理能力)。
+    // 交棒等待用 LinkAwaiter(送 POINT → await 甲機回 DONE 帶逾時)→ Sim 同步遞送與真機 UDP 非同步遞送皆正確
+    //   (舊版「送 POINT 後同步讀旗標」只在 Sim 成立);甲機逾時沒回(離線/卡住)→ 乙機降級口述、不卡死。可重入。
     public sealed class GeometryRelayGame
     {
         private readonly IKebbiBody _guide;     // 甲機：會走位、手臂指認
         private readonly IRobotLink _guideLink;
         private readonly IRobotLink _reasonerLink;
         private readonly IVoice _reasonerVoice; // 乙機：宣告理由
+        private readonly LinkAwaiter _awaiter;  // 乙機在自己的 link 上等甲機回 DONE
+        private readonly int _doneTimeoutMs;
         private readonly Action<string> _log;
-        private string _lastDoneEdge;
 
-        public int StepsDone { get; private set; }
+        public int StepsDone { get; private set; }     // 完成的步數
+        public int StepsSkipped { get; private set; }   // 甲機逾時沒回 → 降級跳過的步數
 
         public sealed class Step
         {
@@ -28,11 +32,15 @@ namespace KebbiBrain.App
             public Step(string reason, string edge, float armAngle) { Reason = reason; Edge = edge; ArmAngle = armAngle; }
         }
 
-        public GeometryRelayGame(IKebbiBody guideBody, IRobotLink guideLink, IRobotLink reasonerLink, IVoice reasonerVoice, Action<string> log)
+        // doneTimeoutMs：等甲機回 DONE 的上限(過了算甲機離線/卡住 → 降級)。
+        public GeometryRelayGame(IKebbiBody guideBody, IRobotLink guideLink, IRobotLink reasonerLink,
+                                 IVoice reasonerVoice, Action<string> log, int doneTimeoutMs = 2000)
         {
-            _guide = guideBody; _guideLink = guideLink; _reasonerLink = reasonerLink; _reasonerVoice = reasonerVoice; _log = log ?? Console.WriteLine;
+            _guide = guideBody; _guideLink = guideLink; _reasonerLink = reasonerLink;
+            _reasonerVoice = reasonerVoice; _log = log ?? Console.WriteLine; _doneTimeoutMs = doneTimeoutMs;
+            _awaiter = new LinkAwaiter(_reasonerLink); // 乙機 link 收 DONE
 
-            // 甲機收到 POINT|edge|angle → 走位 + 手臂指向 + 回 DONE
+            // 甲機收到 POINT|edge|angle → 走位 + 手臂指向 + 回 DONE|edge
             _guideLink.OnMessage((from, t) =>
             {
                 if (!t.StartsWith("POINT")) return;
@@ -45,22 +53,26 @@ namespace KebbiBrain.App
                 _log("   👉 甲機 走到並指向 " + edge);
                 _guideLink.SendAsync(from, "DONE|" + edge);
             });
-
-            // 乙機收到 DONE → 記錄完成的邊
-            _reasonerLink.OnMessage((from, t) => { if (t.StartsWith("DONE")) _lastDoneEdge = t.Split('|')[1]; });
         }
 
         public async Task RunProofAsync(List<Step> steps)
         {
+            StepsDone = 0; StepsSkipped = 0; // 可重入:每場重置
             foreach (var s in steps)
             {
                 await _reasonerVoice.SpeakAsync(s.Reason, "zh-TW");   // 乙機宣告理由
-                _lastDoneEdge = null;
+                // 鐵則:先註冊 DONE 等待者,再送 POINT(Sim 同步遞送下 DONE 會在 SendAsync 當下就回,先送會漏接)。
+                var doneTask = _awaiter.WaitForAsync((f, t) => t == "DONE|" + s.Edge, _doneTimeoutMs);
                 await _reasonerLink.SendAsync(_guideLink.RobotId, "POINT|" + s.Edge + "|" + s.ArmAngle.ToString(CultureInfo.InvariantCulture));
-                if (_lastDoneEdge == s.Edge)
+                if (await doneTask != null)
                 {
                     StepsDone++;
                     _log("   ✔ 第 " + StepsDone + " 步完成：「" + s.Reason + "」→ 指認 " + s.Edge);
+                }
+                else
+                {
+                    StepsSkipped++;
+                    _log("   ⚠ 甲機逾時沒回（離線/卡住）→ 乙機降級口述、不卡死，繼續下一步");
                 }
             }
         }

@@ -33,6 +33,7 @@ namespace KebbiBrain
             T_HeadClamp_Edges();
             T_BodyCommand_Edges();
             T_G2_GeometryRelay();
+            T_G2_Degrade();
             T_G5_Debate();
             T_G1_RelayQuest();
             T_G1_Obstacle();
@@ -557,6 +558,28 @@ namespace KebbiBrain
             game.RunProofAsync(proof).GetAwaiter().GetResult();
             Check("G2-完成全部 3 步接力", game.StepsDone == 3);
             Check("G2-甲機手臂停在末步角度 80°", Math.Abs(guideBody.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+        }
+
+        // G2 接 LinkAwaiter 後的「甲機逾時降級」與「可重入」(送 POINT→await DONE 帶逾時,真機 UDP 也正確)。
+        private static void T_G2_Degrade()
+        {
+            Action<string> noop = _ => { };
+            // 甲機離線:乙機在 bus1、甲機在「另一條 bus」→ POINT 送不到甲機 → 乙機逾時降級(短逾時)。
+            var bus1 = new SimRobotBus(noop);
+            var bus2 = new SimRobotBus(noop);
+            var offline = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus2.CreateLink("甲機"), bus1.CreateLink("乙機"), new SimVoice(noop), noop, doneTimeoutMs: 40);
+            offline.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProof()).GetAwaiter().GetResult();
+            Check("G2降級-甲機離線:3 步全降級(StepsSkipped=3)", offline.StepsSkipped == 3);
+            Check("G2降級-甲機離線:完成 0 步、不卡死", offline.StepsDone == 0);
+
+            // 可重入:同實例(同 bus,甲機在線)連跑兩場 → 第二場仍 3 步、計數歸零不累加
+            var bus = new SimRobotBus(noop);
+            var g = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus.CreateLink("甲機"), bus.CreateLink("乙機"), new SimVoice(noop), noop, doneTimeoutMs: 40);
+            g.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProof()).GetAwaiter().GetResult();
+            g.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProof()).GetAwaiter().GetResult();
+            Check("G2降級-可重入:第二場仍 3 步、計數歸零不累加", g.StepsDone == 3 && g.StepsSkipped == 0);
         }
 
         private static void T_G5_Debate()

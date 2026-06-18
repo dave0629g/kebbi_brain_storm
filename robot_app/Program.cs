@@ -358,9 +358,20 @@ namespace KebbiBrain
 
             log("========== G2《幾何證明接力站》Demo（雙機說—走—指—接棒） ==========");
             log("（題目：證明等腰三角形兩底角相等；學生站進地面大圖，跟著兩機接力）");
+            log("【正常 ▶ 乙機送 POINT → await 甲機回 DONE 才念下一步（真機 UDP 也正確）】");
             await game.RunProofAsync(GeometryRelayGame.MakeIsoscelesProof());
-            log("");
-            log("=== 完成 " + game.StepsDone + " 步證明接力 ===");
+            log("→ 完成 " + game.StepsDone + " 步證明接力");
+
+            // 降級備案:甲機離線(放到另一條 bus,POINT 送不到)→ 乙機逾時降級口述、不卡死。
+            log("\n【降級 ▶ 甲機臨時離線：乙機 await DONE 逾時 → 降級口述、不卡死】");
+            var busR = new SimRobotBus(log);
+            var busG = new SimRobotBus(_ => { }); // 甲機在另一條 bus = 離線
+            var degrade = new GeometryRelayGame(new SimKebbiBody(_ => { }, true),
+                busG.CreateLink("甲機"), busR.CreateLink("乙機"), new SimVoice(log), log, doneTimeoutMs: 300);
+            await degrade.RunProofAsync(GeometryRelayGame.MakeIsoscelesProof());
+            log("→ 完成 " + degrade.StepsDone + " 步、降級 " + degrade.StepsSkipped + " 步（甲機離線也不卡死，乙機照念完）");
+
+            log("\n=== 重點：交棒等待用 LinkAwaiter（await+逾時）→ Sim 與真機 UDP 皆正確；甲機離線自動降級 ===");
             log("====================================================");
         }
 
