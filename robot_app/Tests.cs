@@ -22,6 +22,7 @@ namespace KebbiBrain
             T_Forward_BackReachability();
             T_Reverse_Correct();
             T_G3_MirrorCoach();
+            T_G3_Session();
             T_RobotLink();
             T_RobotLinkProtocol();
             T_RemoteBody();
@@ -161,6 +162,32 @@ namespace KebbiBrain
             pose.Enqueue(false);
             game.RunRepAsync(move).GetAwaiter().GetResult();
             Check("G3-姿態錯誤不加分", game.Score == s);
+        }
+
+        // G3 多動作 session:逐組示範+計分、組間語音切換下一組(暖身/太極/CPR);可重入。
+        private static void T_G3_Session()
+        {
+            Action<string> noop = _ => { };
+            var routine = App.MirrorCoachGame.MakeDefaultRoutine();
+            Check("G3 session-內建課表 3 組(暖身/太極/CPR)",
+                routine.Count == 3 && routine[1].Name == "太極上肢起式" && routine[2].Name == "CPR 肘直手臂");
+
+            var pose = new SimPoseSensor(noop);
+            var game = new App.MirrorCoachGame(SilentSim(out _, out _), pose);
+            pose.Enqueue(true); pose.Enqueue(true); pose.Enqueue(true);
+            game.RunSessionAsync(routine).GetAwaiter().GetResult();
+            Check("G3 session-跑完 3 組(Reps=3)", game.Reps == 3);
+            Check("G3 session-全標準得 3 分", game.Score == 3);
+
+            // 一組姿態錯 → 3 拍得 2 分;同實例再跑一場驗可重入(計數歸零不累加)
+            var pose2 = new SimPoseSensor(noop);
+            var game2 = new App.MirrorCoachGame(SilentSim(out _, out _), pose2);
+            pose2.Enqueue(true); pose2.Enqueue(false); pose2.Enqueue(true);
+            game2.RunSessionAsync(App.MirrorCoachGame.MakeDefaultRoutine()).GetAwaiter().GetResult();
+            Check("G3 session-一組錯 → 3 拍得 2 分", game2.Reps == 3 && game2.Score == 2);
+            pose2.Enqueue(true); pose2.Enqueue(true); pose2.Enqueue(true);
+            game2.RunSessionAsync(App.MirrorCoachGame.MakeDefaultRoutine()).GetAwaiter().GetResult();
+            Check("G3 session-可重入:第二場計數歸零(Reps=3、Score=3 非累加)", game2.Reps == 3 && game2.Score == 3);
         }
 
         private static void T_RobotLink()

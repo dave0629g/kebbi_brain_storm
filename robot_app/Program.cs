@@ -423,7 +423,7 @@ namespace KebbiBrain
             var move = MirrorCoachGame.MakeWarmup();
 
             log("========== G3《鏡像體操教練》文字模擬器 Demo ==========");
-            log("（▶ 第 1 拍：學生跟對）");
+            log("（▶ 第 1 拍：暖身，學生跟對）");
             pose.Enqueue(true);
             await game.RunRepAsync(move);
 
@@ -431,13 +431,9 @@ namespace KebbiBrain
             body.CurrentDoa = -120;
             await game.HandleTooFastAsync(body.ReadDoaDegrees());
 
-            log("\n（▶ 第 2 拍：放慢後學生還沒跟上）");
-            pose.Enqueue(false);
-            await game.RunRepAsync(move);
-
-            log("\n（▶ 第 3 拍：跟上了）");
-            pose.Enqueue(true);
-            await game.RunRepAsync(move);
+            log("\n（▶ 完整課表：暖身 → 太極 → CPR，逐組帶完語音切換下一組）");
+            pose.Enqueue(true); pose.Enqueue(true); pose.Enqueue(true);
+            await game.RunSessionAsync(MirrorCoachGame.MakeDefaultRoutine());
 
             game.PrintSummary();
             log("====================================================");

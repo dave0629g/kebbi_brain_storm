@@ -47,6 +47,29 @@ namespace KebbiBrain.App
             return m;
         }
 
+        // 太極上肢起式：緩起前舉 → 沉落（肩 Y + 肘 Y，慢節奏）。
+        public static Move MakeTaichi()
+        {
+            var m = new Move("太極上肢起式");
+            m.Frames.Add(new JointFrame("起式：垂臂沉肩").Set(KebbiMotor.RShoulderY, 0f).Set(KebbiMotor.LShoulderY, 0f).Set(KebbiMotor.RElbowY, 0f).Set(KebbiMotor.LElbowY, 0f));
+            m.Frames.Add(new JointFrame("緩起：雙臂前舉至肩高").Set(KebbiMotor.RShoulderY, 90f).Set(KebbiMotor.LShoulderY, 90f).Set(KebbiMotor.RElbowY, 20f).Set(KebbiMotor.LElbowY, 20f));
+            m.Frames.Add(new JointFrame("沉落：緩緩收回").Set(KebbiMotor.RShoulderY, 0f).Set(KebbiMotor.LShoulderY, 0f).Set(KebbiMotor.RElbowY, 0f).Set(KebbiMotor.LElbowY, 0f));
+            return m;
+        }
+
+        // CPR 肘直手臂姿勢：雙臂前伸、手肘打直下壓（衛教情境）。
+        public static Move MakeCpr()
+        {
+            var m = new Move("CPR 肘直手臂");
+            m.Frames.Add(new JointFrame("預備：雙臂前伸").Set(KebbiMotor.RShoulderY, 70f).Set(KebbiMotor.LShoulderY, 70f).Set(KebbiMotor.RElbowY, 0f).Set(KebbiMotor.LElbowY, 0f));
+            m.Frames.Add(new JointFrame("下壓：肘打直、肩前傾").Set(KebbiMotor.RShoulderY, 100f).Set(KebbiMotor.LShoulderY, 100f).Set(KebbiMotor.RElbowY, 0f).Set(KebbiMotor.LElbowY, 0f));
+            m.Frames.Add(new JointFrame("回彈：回到預備").Set(KebbiMotor.RShoulderY, 70f).Set(KebbiMotor.LShoulderY, 70f));
+            return m;
+        }
+
+        // 內建課表：暖身 → 太極 → CPR（手冊運作流程 step5：完成一組語音切換下一組）。
+        public static List<Move> MakeDefaultRoutine() => new List<Move> { MakeWarmup(), MakeTaichi(), MakeCpr() };
+
         // 逐幀示範（依 BPM 決定每拍停留；不真的 sleep，以保持自測快速）
         public async Task PlayMoveAsync(Move move)
         {
@@ -68,6 +91,19 @@ namespace KebbiBrain.App
             if (ok) { Score++; await _ctx.Voice.SpeakAsync("很好！動作很標準！", "zh-TW"); }
             else { await _ctx.Voice.SpeakAsync("再一次，慢慢來，跟上我的手。", "zh-TW"); }
             return ok;
+        }
+
+        // 跑整套課表：逐組示範+計分,組間語音切換下一組(手冊運作流程 step5)。可重入(整場重置)。
+        public async Task RunSessionAsync(List<Move> moves)
+        {
+            Reps = 0; Score = 0;
+            for (int i = 0; i < moves.Count; i++)
+            {
+                if (i > 0) await _ctx.Voice.SpeakAsync("這組完成！接下來換「" + moves[i].Name + "」，準備好跟我做。", "zh-TW");
+                _ctx.Log("── 第 " + (i + 1) + " 組：" + moves[i].Name + " ──");
+                await RunRepAsync(moves[i]);
+            }
+            await _ctx.Voice.SpeakAsync("今天的體育課到這裡，做得很好！", "zh-TW");
         }
 
         // 學生喊「太快了」：讀 DOA → 轉頭面向他 → 降 BPM。回傳是否能完整面向。
