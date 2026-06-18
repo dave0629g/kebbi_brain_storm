@@ -375,7 +375,16 @@ namespace KebbiBrain
             await degrade.RunProofAsync(GeometryRelayGame.MakeIsoscelesProof());
             log("→ 完成 " + degrade.StepsDone + " 步、降級 " + degrade.StepsSkipped + " 步（甲機離線也不卡死，乙機照念完）");
 
-            log("\n=== 重點：交棒等待用 LinkAwaiter（await+逾時）→ Sim 與真機 UDP 皆正確；甲機離線自動降級 ===");
+            // 學習單作答:乙機問每步邏輯層次,學生答 → 答對計分、答錯念提示(把證明結構外化成可驗證作答)。
+            log("\n【學習單 ▶ 乙機問每步是「已知/因為/所以」，學生作答計分】");
+            var wbBus = new SimRobotBus(log);
+            var wbVoice = new SimVoice(log);
+            wbVoice.EnqueueHeard("已知"); wbVoice.EnqueueHeard("我不確定"); wbVoice.EnqueueHeard("所以"); // 第2步故意答錯
+            var wb = new GeometryRelayGame(new SimKebbiBody(log, true), wbBus.CreateLink("甲機"), wbBus.CreateLink("乙機"), wbVoice, log);
+            await wb.RunProofAsync(GeometryRelayGame.MakeIsoscelesProofWorksheet());
+            log("→ 學習單得分：" + wb.Score + " / 3（答錯那步乙機已念提示）");
+
+            log("\n=== 重點：交棒用 LinkAwaiter（真機也正確）、甲機離線自動降級、學習單把證明結構外化成可驗證作答 ===");
             log("====================================================");
         }
 

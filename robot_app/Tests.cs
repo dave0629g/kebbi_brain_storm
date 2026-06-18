@@ -35,6 +35,7 @@ namespace KebbiBrain
             T_BodyCommand_Edges();
             T_G2_GeometryRelay();
             T_G2_Degrade();
+            T_G2_Worksheet();
             T_G5_Debate();
             T_G5_Score();
             T_G1_RelayQuest();
@@ -587,6 +588,32 @@ namespace KebbiBrain
             game.RunProofAsync(proof).GetAwaiter().GetResult();
             Check("G2-完成全部 3 步接力", game.StepsDone == 3);
             Check("G2-甲機手臂停在末步角度 80°", Math.Abs(guideBody.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+        }
+
+        // G2 學習單作答驗證:乙機問「這步是已知/因為/所以?」,學生答(注入)→ 答對計分、答錯念提示;
+        // 作答不擋接力(StepsDone 照走);無 Layer 的舊題目不出題(向後相容)。
+        private static void T_G2_Worksheet()
+        {
+            Action<string> noop = _ => { };
+            var bus = new SimRobotBus(noop);
+            var voice = new SimVoice(noop); // 乙機 voice:注入學生答案
+            var game = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus.CreateLink("甲機"), bus.CreateLink("乙機"), voice, noop);
+
+            // 第1步對(已知)、第2步錯、第3步對(所以)→ 答對 2 題
+            voice.EnqueueHeard("已知"); voice.EnqueueHeard("我不知道"); voice.EnqueueHeard("所以");
+            game.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProofWorksheet()).GetAwaiter().GetResult();
+            Check("G2學習單-完成 3 步證明(作答不擋接力)", game.StepsDone == 3);
+            Check("G2學習單-答對 2 題得 2 分", game.Score == 2);
+
+            // 全對 → 3 分;可重入(分數重置非累加)
+            voice.EnqueueHeard("已知"); voice.EnqueueHeard("因為"); voice.EnqueueHeard("所以");
+            game.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProofWorksheet()).GetAwaiter().GetResult();
+            Check("G2學習單-全對得 3 分、可重入(分數重置)", game.Score == 3 && game.StepsDone == 3);
+
+            // 無 Layer 的舊題目 → 不出學習單題、Score=0(向後相容)
+            game.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProof()).GetAwaiter().GetResult();
+            Check("G2學習單-無 Layer 題目不出題(Score=0)", game.Score == 0 && game.StepsDone == 3);
         }
 
         // G2 接 LinkAwaiter 後的「甲機逾時降級」與「可重入」(送 POINT→await DONE 帶逾時,真機 UDP 也正確)。
