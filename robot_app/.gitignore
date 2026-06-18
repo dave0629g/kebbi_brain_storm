@@ -1,2 +1,5 @@
 bin/
 obj/
+
+# Unity symlink 進 KebbiBrainUnity 時會於 robot_app/src 寫 .meta(主控台 build 不需要)
+*.meta

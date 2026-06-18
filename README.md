@@ -26,18 +26,32 @@ UNITY_接入指南.md          Unity 專案建立、SDK 匯入、build/部署、
 
 ## 跑起來(主控台)
 
-需要 .NET SDK 8(本機裝在 `~/.dotnet`):
+需要 .NET SDK(本機只有 .NET 10;專案目標 net8.0,執行需 roll-forward):
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"
+export DOTNET_ROLL_FORWARD=Major        # 本機無 net8 runtime,滾到 net10 執行
 cd robot_app
-dotnet run --project KebbiBrain.Sim.csproj -- --test     # 自我測試(目前 92/92 綠)
+dotnet run --project KebbiBrain.Sim.csproj -- --test     # 自我測試(目前 153/153 綠)
 dotnet run --project KebbiBrain.Sim.csproj -- --menu     # 列出所有命令
-dotnet run --project KebbiBrain.Sim.csproj               # G4《Tebak Arah》文字模擬器 Demo
-dotnet run --project KebbiBrain.Sim.csproj -- --g1       # 其他:--g1 --g2 --g3 --g5 --link
 ```
 
-雲端(需金鑰,見下):`--cloud-test`(雲端自測)、`--target cloudsim`(真語音跑整場 Demo)。
+### 🎮 示範小遊戲 — 每個命令示範「哪一個功能」
+
+> 原則:每個小功能都配一個主控台示範。下表把「命令 → 示範的功能 → 一句重點」對齊清楚(皆純 Sim、免金鑰、免實機)。
+
+| 命令 | 示範的功能 | 一句重點(只有平板做不到的點) |
+|---|---|---|
+| (無參數) | **G4《Tebak Arah》印尼語方位遊戲** | DOA 聲源定位 + 轉頭面向學生 + 雲端印尼語語音(校準四生→出方位題→糾錯) |
+| `--g1` | **G1《雙機接力闖關》** | 指令序列直譯→雙機地板接力;交棒握手 + 「未交棒就到終點=闖關失敗」判定 |
+| `--g2` | **G2《幾何證明接力站》** | 雙機「說—走—指—接棒」:乙機念理由→甲機走位+手臂指認該邊→回報接棒 |
+| `--g3` | **G3《鏡像體操教練》** | 關節逐幀立體示範 + 聽到「太快了」用 DOA 轉頭面向+放慢 BPM |
+| `--g5` | **G5《法庭辯論劇場》** | 雙機事件交棒接力辯論 + 向中央移動逼近 + DOA 轉向發言學生 + 手臂指控/攤手 |
+| `--link` | **多機協作基礎(IRobotLink)** | 雙機交棒握手(HANDOFF/ACK) + 合體彩蛋廣播(CUE/READY) |
+| `--rv` | **多機遠端語音(RemoteVoiceProxy)** | 把 G5 辯方換成遠端被控機→台詞由「被控機自己的喇叭」說出;含 `VC\|DONE` 播畢握手(說完才交棒) |
+| `--finale` | **合體彩蛋(FinaleShowGame)** | 中控導演機編排多站接力 + **降級備案**(離線/慢站自動跳過,壓軸照跑) + 非同步慢站 await |
+
+雲端(需金鑰,見下):`--cloud-test`(雲端自測:Azure 印尼語 + LLM)、`--target cloudsim`(真語音跑整場 G4 Demo)、`--target real`(實機守門,僅 Unity 建置)。
 
 ## 架構:三層後端,切參數即換
 
