@@ -37,6 +37,7 @@ namespace KebbiBrain
             T_G2_Degrade();
             T_G2_Worksheet();
             T_G2_Library();
+            T_G2_Session();
             T_G5_Debate();
             T_G5_Score();
             T_G1_RelayQuest();
@@ -598,6 +599,27 @@ namespace KebbiBrain
         }
 
         // G2 證明題庫:多題型(等腰底角/內角和/外角定理)可換題,每題皆學習單版;逐題驗跑完 3 步、甲機末步指向角。
+        // G2 多回合場次:RunSessionAsync 跑題庫多題,累計步數/學習單得分 → 場次結算;可重入。
+        private static void T_G2_Session()
+        {
+            Action<string> noop = _ => { };
+            var bus = new SimRobotBus(noop);
+            var voice = new SimVoice(noop);
+            var game = new App.GeometryRelayGame(new SimKebbiBody(noop, true),
+                bus.CreateLink("甲機"), bus.CreateLink("乙機"), voice, noop);
+            var lib = App.GeometryRelayGame.MakeProofLibrary(); // 3 題,每題學習單版 3 步(已知/因為/所以)
+            for (int p = 0; p < lib.Count; p++) { voice.EnqueueHeard("已知"); voice.EnqueueHeard("因為"); voice.EnqueueHeard("所以"); }
+            game.RunSessionAsync(lib).GetAwaiter().GetResult();
+            Check("G2場次-完成 3 題", game.ProofsDone == 3);
+            Check("G2場次-共 9 步(3題×3步)", game.SessionSteps == 9);
+            Check("G2場次-學習單總分 9(全對)", game.SessionScore == 9);
+
+            // 可重入:再跑一場(部分答錯)→ 計數歸零、總分反映本場
+            for (int p = 0; p < lib.Count; p++) { voice.EnqueueHeard("已知"); voice.EnqueueHeard("錯"); voice.EnqueueHeard("所以"); }
+            game.RunSessionAsync(lib).GetAwaiter().GetResult();
+            Check("G2場次-可重入:第二場每題錯1 → 總分 6(非累加)、題數 3", game.SessionScore == 6 && game.ProofsDone == 3);
+        }
+
         private static void T_G2_Library()
         {
             Action<string> noop = _ => { };

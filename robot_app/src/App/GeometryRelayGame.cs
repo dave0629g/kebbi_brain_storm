@@ -24,6 +24,9 @@ namespace KebbiBrain.App
         public int StepsDone { get; private set; }     // 完成的步數
         public int StepsSkipped { get; private set; }   // 甲機逾時沒回 → 降級跳過的步數
         public int Score { get; private set; }          // 學習單作答得分(每步答對邏輯層次 +1;Layer 為 null 的步不計)
+        public int ProofsDone { get; private set; }      // 場次:完成的題數
+        public int SessionSteps { get; private set; }    // 場次:累計步數(跨題)
+        public int SessionScore { get; private set; }    // 場次:累計學習單得分(跨題)
 
         public sealed class Step
         {
@@ -94,6 +97,24 @@ namespace KebbiBrain.App
                 }
             }
         }
+
+        // 多回合場次:逐題念題名→跑該題接力(含學習單作答)→ 累計步數/得分 → 結算。可重入(每場重置)。
+        public async Task RunSessionAsync(List<Proof> proofs)
+        {
+            ProofsDone = 0; SessionSteps = 0; SessionScore = 0;
+            for (int i = 0; i < proofs.Count; i++)
+            {
+                await _reasonerVoice.SpeakAsync("第 " + (i + 1) + " 題：" + proofs[i].Title, "zh-TW");
+                _log("── 第 " + (i + 1) + " 題：" + proofs[i].Title + " ──");
+                await RunProofAsync(proofs[i].Steps);          // 設定本題 StepsDone/Score
+                SessionSteps += StepsDone; SessionScore += Score; ProofsDone++;
+            }
+            PrintSessionSummary();
+        }
+
+        // 場次結算報告。
+        public void PrintSessionSummary()
+            => _log("=== G2 場次結算：完成 " + ProofsDone + " 題、共 " + SessionSteps + " 步、學習單總分 " + SessionScore + " ===");
 
         // 內建範例證明：等腰三角形「兩底角相等」的 3 步接力。
         public static List<Step> MakeIsoscelesProof()
