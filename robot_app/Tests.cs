@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using KebbiBrain.App;
 using KebbiBrain.Hardware;
 using KebbiBrain.Sim;
@@ -25,6 +26,7 @@ namespace KebbiBrain
             T_RobotLinkProtocol();
             T_RemoteBody();
             T_RemoteVoice();
+            T_LinkAwaiter();
             T_Direction_Edges();
             T_HeadClamp_Edges();
             T_BodyCommand_Edges();
@@ -377,6 +379,46 @@ namespace KebbiBrain
             Check("遠端語音-整合:交棒訊息仍進 alsoHandle(未被誤吞)", yourTurn);
         }
 
+        // LinkAwaiter:在 IRobotLink 上「送出→await 等符合條件的回覆、帶逾時」。多機編排(FinaleShowGame)的真機正確性基礎。
+        private static void T_LinkAwaiter()
+        {
+            Action<string> noop = _ => { };
+            var bus = new SimRobotBus(noop);
+            var a = bus.CreateLink("A");
+            var b = bus.CreateLink("B");
+            var awaiter = new LinkAwaiter(a); // a 的訊息由 awaiter 處理
+
+            // 同步命中:先註冊等待者,B 立即回 → await 取得回覆內容
+            var t1 = awaiter.WaitForAsync((f, x) => f == "B" && x.StartsWith("PONG"), 1000);
+            b.OnMessage((f, x) => { if (x == "PING") b.SendAsync(f, "PONG-1"); });
+            a.SendAsync("B", "PING").GetAwaiter().GetResult();
+            Check("LinkAwaiter-同步命中取得回覆", t1.GetAwaiter().GetResult() == "PONG-1");
+
+            // 逾時:沒人回 → 短逾時後回 null
+            var t2 = awaiter.WaitForAsync((f, x) => x == "NEVER", 30);
+            Check("LinkAwaiter-逾時回 null", t2.GetAwaiter().GetResult() == null);
+
+            // from 比對:只接受指定來源(C 回的不算 → 逾時 null)
+            var c = bus.CreateLink("C");
+            var t3 = awaiter.WaitForAsync((f, x) => f == "B" && x == "HIT", 30);
+            c.SendAsync("A", "HIT").GetAwaiter().GetResult(); // 來自 C,from 不符
+            Check("LinkAwaiter-from 不符不命中(逾時 null)", t3.GetAwaiter().GetResult() == null);
+
+            // 多等待者並存:兩個不同 predicate 同時等,各自被對應訊息命中
+            b.OnMessage((f, x) => { }); // 清掉 B 的 PING handler 避免干擾
+            var tx = awaiter.WaitForAsync((f, x) => x == "X", 1000);
+            var ty = awaiter.WaitForAsync((f, x) => x == "Y", 1000);
+            b.SendAsync("A", "Y").GetAwaiter().GetResult();
+            b.SendAsync("A", "X").GetAwaiter().GetResult();
+            Check("LinkAwaiter-多等待者各自命中(Y)", ty.GetAwaiter().GetResult() == "Y");
+            Check("LinkAwaiter-多等待者各自命中(X)", tx.GetAwaiter().GetResult() == "X");
+
+            // 非同步回覆:延遲後才回 → await 仍正確等到(真機 UDP 非同步代理)
+            var t4 = awaiter.WaitForAsync((f, x) => x == "LATE", 1000);
+            _ = Task.Run(async () => { await Task.Delay(20); await b.SendAsync("A", "LATE"); });
+            Check("LinkAwaiter-非同步延遲回覆 await 等到", t4.GetAwaiter().GetResult() == "LATE");
+        }
+
         // 方位扇區邊界 + 角度正規化 + 印尼語詞往返(把 G4 的方位判定逼到邊角)。
         private static void T_Direction_Edges()
         {
@@ -523,7 +565,7 @@ namespace KebbiBrain
             var g2 = MakeStation(bus, "G2-站機", ack: true, done: true);
             var g3 = MakeStation(bus, "G3-站機", ack: true, done: true);
             MakeStation(bus, "G5-夥伴機", ack: true, done: true);
-            var game = new App.FinaleShowGame(bus.CreateLink("中控導演機"), hostBody, noop);
+            var game = new App.FinaleShowGame(bus.CreateLink("中控導演機"), hostBody, noop, ackTimeoutMs: 40, doneTimeoutMs: 40);
             game.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             Check("彩蛋-三站全到:跑了 3 站", game.StationsRun == 3);
             Check("彩蛋-三站全到:跳過 0 站", game.StationsSkipped == 0);
@@ -537,7 +579,7 @@ namespace KebbiBrain
             var hostBody2 = new RecordingBody();
             MakeStation(bus2, "G2-站機", true, true);
             MakeStation(bus2, "G5-夥伴機", true, true);   // 故意不建 "G3-站機" → 離線
-            var game2 = new App.FinaleShowGame(bus2.CreateLink("中控導演機"), hostBody2, noop);
+            var game2 = new App.FinaleShowGame(bus2.CreateLink("中控導演機"), hostBody2, noop, ackTimeoutMs: 40, doneTimeoutMs: 40);
             game2.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             Check("彩蛋-一站離線:跑了 2 站", game2.StationsRun == 2);
             Check("彩蛋-一站離線:跳過 1 站(降級)", game2.StationsSkipped == 1);
@@ -549,7 +591,7 @@ namespace KebbiBrain
             MakeStation(bus3, "G2-站機", ack: true, done: false); // 卡住:開始了沒回完成
             MakeStation(bus3, "G3-站機", true, true);
             MakeStation(bus3, "G5-夥伴機", true, true);
-            var game3 = new App.FinaleShowGame(bus3.CreateLink("中控導演機"), hostBody3, noop);
+            var game3 = new App.FinaleShowGame(bus3.CreateLink("中控導演機"), hostBody3, noop, ackTimeoutMs: 40, doneTimeoutMs: 40);
             game3.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             Check("彩蛋-一站卡住(ACK 無 DONE):跑了 2 站", game3.StationsRun == 2);
             Check("彩蛋-一站卡住:跳過 1 站", game3.StationsSkipped == 1);
@@ -558,7 +600,7 @@ namespace KebbiBrain
             // 情境 4:全站離線 → 跑 0、跳 3,壓軸仍達成(中控獨撐收尾,降級不崩)
             var bus4 = new SimRobotBus(noop);
             var hostBody4 = new RecordingBody();
-            var game4 = new App.FinaleShowGame(bus4.CreateLink("中控導演機"), hostBody4, noop);
+            var game4 = new App.FinaleShowGame(bus4.CreateLink("中控導演機"), hostBody4, noop, ackTimeoutMs: 40, doneTimeoutMs: 40);
             game4.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             Check("彩蛋-全站離線:跑了 0 站", game4.StationsRun == 0);
             Check("彩蛋-全站離線:跳過 3 站", game4.StationsSkipped == 3);
@@ -571,10 +613,34 @@ namespace KebbiBrain
             MakeStation(bus5, "G2-站機", true, true);
             MakeStation(bus5, "G3-站機", true, true);
             MakeStation(bus5, "G5-夥伴機", true, true);
-            var game5 = new App.FinaleShowGame(bus5.CreateLink("中控導演機"), hostBody5, noop);
+            var game5 = new App.FinaleShowGame(bus5.CreateLink("中控導演機"), hostBody5, noop, ackTimeoutMs: 40, doneTimeoutMs: 40);
             game5.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             game5.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
             Check("彩蛋-可重入:第二場計數歸零不累加(跑 3 非 6)", game5.StationsRun == 3 && game5.StationsSkipped == 0);
+
+            // 情境 6(非同步路徑):站台「延遲後」才回 ACK/DONE(不在 SendAsync 當下) → 證明中控真的 await 等到,
+            // 非舊版「同步讀旗標」(那會在這裡讀到 null 而誤判離線)。這是真機 UDP 非同步遞送的代理測試。
+            var busAsync = new SimRobotBus(noop);
+            var hostAsync = new RecordingBody();
+            var aLink = busAsync.CreateLink("G2-站機");
+            aLink.OnMessage((from, t) =>
+            {
+                if (t.StartsWith("CUE|"))
+                {
+                    string role = t.Substring(4);
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(20);                       // 延遲後才回(非同步)
+                        await aLink.SendAsync(from, "ACK|" + role);
+                        await aLink.SendAsync(from, "DONE|" + role);
+                    });
+                }
+            });
+            var gameAsync = new App.FinaleShowGame(busAsync.CreateLink("中控導演機"), hostAsync, noop); // 用預設較長逾時(>20ms)
+            gameAsync.RunShowAsync(new System.Collections.Generic.List<App.FinaleShowGame.Station>
+                { new App.FinaleShowGame.Station("G2 具身幾何站", "G2-站機") }).GetAwaiter().GetResult();
+            Check("彩蛋-非同步延遲回應:中控 await 等到 → 跑 1 站(證明非同步路徑正確)",
+                gameAsync.StationsRun == 1 && gameAsync.StationsSkipped == 0);
         }
     }
 }

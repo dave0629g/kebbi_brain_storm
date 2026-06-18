@@ -234,7 +234,8 @@ namespace KebbiBrain
             Action<string> log = Console.WriteLine;
 
             // 建一個「在場站台」:收 CUE→演出(印一行+舉手)→回 ACK/DONE;收 FINALE→走位中央+同步舉手。
-            void Station(SimRobotBus bus, string id, string perform)
+            // delayMs>0 → 延遲「非同步」才回 ACK/DONE(模擬真機 UDP 回覆不在當下到),示範中控 await 等待。
+            void Station(SimRobotBus bus, string id, string perform, int delayMs = 0)
             {
                 Action<string> sLog = s => log("      [" + id + "] " + s);
                 var body = new SimKebbiBody(sLog, canMove: true);
@@ -246,8 +247,18 @@ namespace KebbiBrain
                         string role = t.Substring(4);
                         sLog("🎭 " + perform);
                         body.SetMotor(KebbiMotor.RShoulderY, 60f);
-                        link.SendAsync(from, "ACK|" + role);
-                        link.SendAsync(from, "DONE|" + role);
+                        if (delayMs > 0)
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(delayMs);                  // 非同步:延遲後才回
+                                await link.SendAsync(from, "ACK|" + role);
+                                await link.SendAsync(from, "DONE|" + role);
+                            });
+                        else
+                        {
+                            link.SendAsync(from, "ACK|" + role);
+                            link.SendAsync(from, "DONE|" + role);
+                        }
                     }
                     else if (t == "FINALE")
                     {
@@ -281,8 +292,22 @@ namespace KebbiBrain
             var showB = new FinaleShowGame(busB.CreateLink("中控導演機"), hostB, log);
             await showB.RunShowAsync(FinaleShowGame.MakeDefaultLineup());
 
-            log("\n=== 重點:第二場 G5 站離線,中控『自動跳過』續跑、壓軸照常 —— 合體翻車不拖垮全場 ===");
-            log("（實機:SimRobotBus→UnityRobotLink(UDP);跳過判定需改 await ACK 帶逾時,見 進度追蹤 BLOCKED）");
+            // ── 第三場:G2 站「非同步」延遲回應 → 中控 await 等到才續(舊版同步檢查會誤判離線) ──
+            log("\n【第三場 ▶ 非同步:G2 站回應較慢(延遲 120ms),中控 await 等到才算它完成】");
+            var busC = new SimRobotBus(log);
+            Station(busC, "G2-站機", "(推理中…)幾何步驟驗證完成", delayMs: 120); // 非同步延遲回 ACK/DONE
+            Station(busC, "G3-站機", "帶全場做體感律動");
+            var hostC = new SimKebbiBody(s => log("      [中控導演機] " + s), canMove: true);
+            var showC = new FinaleShowGame(busC.CreateLink("中控導演機"), hostC, log);
+            await showC.RunShowAsync(new System.Collections.Generic.List<FinaleShowGame.Station>
+            {
+                new FinaleShowGame.Station("G2 具身幾何站", "G2-站機"),
+                new FinaleShowGame.Station("G3 體感律動站", "G3-站機"),
+            });
+            log("（G2 站延遲 120ms 才回 ACK/DONE,中控『await 等到』才算完成 → 跑 " + showC.StationsRun + " 站；舊版同步檢查會把它誤判離線）");
+
+            log("\n=== 重點:離線站自動跳過(降級不崩)、慢站 await 等到(真機非同步也正確) —— 合體翻車不拖垮全場 ===");
+            log("（實機:SimRobotBus→UnityRobotLink(UDP),靠 LinkAwaiter 的 await+逾時 → Sim 與真機 UDP 皆正確）");
             log("====================================================");
         }
 
