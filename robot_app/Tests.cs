@@ -36,6 +36,7 @@ namespace KebbiBrain
             T_G2_GeometryRelay();
             T_G2_Degrade();
             T_G2_Worksheet();
+            T_G2_Library();
             T_G5_Debate();
             T_G5_Score();
             T_G1_RelayQuest();
@@ -588,6 +589,28 @@ namespace KebbiBrain
             game.RunProofAsync(proof).GetAwaiter().GetResult();
             Check("G2-完成全部 3 步接力", game.StepsDone == 3);
             Check("G2-甲機手臂停在末步角度 80°", Math.Abs(guideBody.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+        }
+
+        // G2 證明題庫:多題型(等腰底角/內角和/外角定理)可換題,每題皆學習單版;逐題驗跑完 3 步、甲機末步指向角。
+        private static void T_G2_Library()
+        {
+            Action<string> noop = _ => { };
+            var lib = App.GeometryRelayGame.MakeProofLibrary();
+            Check("G2題庫-3 題", lib.Count == 3);
+            Check("G2題庫-題目有標題(等腰/內角和/外角)",
+                lib[0].Title == "等腰三角形兩底角相等" && lib[1].Title == "三角形內角和 180°" && lib[2].Title == "三角形外角定理");
+
+            foreach (var p in lib)
+            {
+                var bus = new SimRobotBus(noop);
+                var guideBody = new SimKebbiBody(noop, true);
+                var voice = new SimVoice(noop);
+                voice.EnqueueHeard("已知"); voice.EnqueueHeard("因為"); voice.EnqueueHeard("所以"); // 學習單正解
+                var game = new App.GeometryRelayGame(guideBody, bus.CreateLink("甲機"), bus.CreateLink("乙機"), voice, noop);
+                game.RunProofAsync(p.Steps).GetAwaiter().GetResult();
+                Check("G2題庫-「" + p.Title + "」跑完 3 步、學習單滿分、末步指向角 80",
+                    game.StepsDone == 3 && game.Score == 3 && System.Math.Abs(guideBody.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+            }
         }
 
         // G2 學習單作答驗證:乙機問「這步是已知/因為/所以?」,學生答(注入)→ 答對計分、答錯念提示;

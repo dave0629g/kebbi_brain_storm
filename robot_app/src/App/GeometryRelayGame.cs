@@ -116,5 +116,45 @@ namespace KebbiBrain.App
                 new Step("所以 △ABD ≅ △ACD（SAS），得 ∠B = ∠C", "△ABD,△ACD", 80f, "所以"),
             };
         }
+
+        // 三角形內角和 = 180° 的 3 步證明(過頂點作底邊平行線 → 內錯角 → 平角)。
+        public static List<Step> MakeAngleSumProof()
+        {
+            return new List<Step>
+            {
+                new Step("過 A 作 BC 的平行線 ℓ（輔助線）", "ℓ", 50f, "已知"),
+                new Step("因為 ℓ∥BC，內錯角相等：∠1 = ∠B、∠2 = ∠C", "∠1,∠2", 30f, "因為"),
+                new Step("所以 ∠A + ∠B + ∠C = 平角 = 180°", "∠A,∠B,∠C", 80f, "所以"),
+            };
+        }
+
+        // 三角形外角定理:外角 = 兩不相鄰內角和。
+        public static List<Step> MakeExteriorAngleProof()
+        {
+            return new List<Step>
+            {
+                new Step("∠ACD 是 △ABC 在 C 的外角，與 ∠ACB 互補（已知）", "∠ACD", 50f, "已知"),
+                new Step("因為 ∠A + ∠B + ∠ACB = 180°（內角和）", "∠A,∠B", 35f, "因為"),
+                new Step("所以 ∠ACD = ∠A + ∠B", "∠ACD,∠A,∠B", 80f, "所以"),
+            };
+        }
+
+        // 具名證明(供換題)。
+        public sealed class Proof
+        {
+            public string Title; public List<Step> Steps;
+            public Proof(string title, List<Step> steps) { Title = title; Steps = steps; }
+        }
+
+        // 證明題庫:讓課堂/展演可換題(每題皆學習單版,含邏輯層次)。
+        public static List<Proof> MakeProofLibrary()
+        {
+            return new List<Proof>
+            {
+                new Proof("等腰三角形兩底角相等", MakeIsoscelesProofWorksheet()),
+                new Proof("三角形內角和 180°", MakeAngleSumProof()),
+                new Proof("三角形外角定理", MakeExteriorAngleProof()),
+            };
+        }
     }
 }

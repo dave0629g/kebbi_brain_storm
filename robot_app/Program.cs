@@ -384,7 +384,16 @@ namespace KebbiBrain
             await wb.RunProofAsync(GeometryRelayGame.MakeIsoscelesProofWorksheet());
             log("→ 學習單得分：" + wb.Score + " / 3（答錯那步乙機已念提示）");
 
-            log("\n=== 重點：交棒用 LinkAwaiter（真機也正確）、甲機離線自動降級、學習單把證明結構外化成可驗證作答 ===");
+            // 證明題庫換題:同一套流程可換不同題型。
+            log("\n【題庫換題 ▶ 換一題：三角形內角和 180°】");
+            var libBus = new SimRobotBus(log);
+            var libVoice = new SimVoice(log);
+            libVoice.EnqueueHeard("已知"); libVoice.EnqueueHeard("因為"); libVoice.EnqueueHeard("所以");
+            var libGame = new GeometryRelayGame(new SimKebbiBody(log, true), libBus.CreateLink("甲機"), libBus.CreateLink("乙機"), libVoice, log);
+            await libGame.RunProofAsync(GeometryRelayGame.MakeAngleSumProof());
+            log("→ 題庫共 " + GeometryRelayGame.MakeProofLibrary().Count + " 題可換（等腰底角／內角和／外角定理）");
+
+            log("\n=== 重點：LinkAwaiter 真機正確、離線降級、學習單可驗證作答、題庫換題 ===");
             log("====================================================");
         }
 
