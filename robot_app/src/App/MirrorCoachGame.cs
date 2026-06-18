@@ -78,6 +78,37 @@ namespace KebbiBrain.App
         // 內建課表：暖身 → 太極 → CPR（手冊運作流程 step5：完成一組語音切換下一組）。
         public static List<Move> MakeDefaultRoutine() => new List<Move> { MakeWarmup(), MakeTaichi(), MakeCpr() };
 
+        // 左右鏡像對映:把右側關節↔左側關節對調(鏡像教練面對學生時「我的左=你的右」)。
+        // 頭部 NeckY/NeckZ 為中軸,不對調。對合(involution):MirrorMotor(MirrorMotor(m))==m。
+        public static KebbiMotor MirrorMotor(KebbiMotor m)
+        {
+            switch (m)
+            {
+                case KebbiMotor.RShoulderY: return KebbiMotor.LShoulderY;
+                case KebbiMotor.LShoulderY: return KebbiMotor.RShoulderY;
+                case KebbiMotor.RShoulderZ: return KebbiMotor.LShoulderZ;
+                case KebbiMotor.LShoulderZ: return KebbiMotor.RShoulderZ;
+                case KebbiMotor.RShoulderX: return KebbiMotor.LShoulderX;
+                case KebbiMotor.LShoulderX: return KebbiMotor.RShoulderX;
+                case KebbiMotor.RElbowY: return KebbiMotor.LElbowY;
+                case KebbiMotor.LElbowY: return KebbiMotor.RElbowY;
+                default: return m; // NeckY/NeckZ 中軸不換
+            }
+        }
+
+        // 產生一個動作的「左右鏡像版」(每幀每關節 R↔L 對調,角度不變)。
+        public static Move MirrorMove(Move move)
+        {
+            var mm = new Move(move.Name + "(鏡像)");
+            foreach (var f in move.Frames)
+            {
+                var nf = new JointFrame(f.Label);
+                foreach (var t in f.Targets) nf.Set(MirrorMotor(t.Key), t.Value);
+                mm.Frames.Add(nf);
+            }
+            return mm;
+        }
+
         // 抽出單幀播放（PlayMoveAsync 與 HandleAgainAsync 共用）：真正把該幀的(馬達,角度)送出 + Log + 設 CurrentFrame。
         private void PlayFrame(Move move, int index)
         {

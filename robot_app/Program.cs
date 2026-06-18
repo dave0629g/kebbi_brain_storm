@@ -486,6 +486,12 @@ namespace KebbiBrain
             pose.Enqueue(true); pose.Enqueue(true); pose.Enqueue(true);
             await game.RunSessionAsync(MirrorCoachGame.MakeDefaultRoutine());
 
+            log("\n（▶ 左右鏡像：示範「只舉右手」的鏡像版＝舉左手，面對學生時「我的左＝你的右」）");
+            var oneArm = new MirrorCoachGame.Move("舉右手");
+            oneArm.Frames.Add(new MirrorCoachGame.JointFrame("舉右手").Set(KebbiMotor.RShoulderY, 90f));
+            pose.Enqueue(true);
+            await game.RunRepAsync(MirrorCoachGame.MirrorMove(oneArm)); // 播鏡像版 → 實際動的是左肩
+
             game.PrintSummary();
             log("====================================================");
         }

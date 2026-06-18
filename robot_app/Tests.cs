@@ -23,6 +23,7 @@ namespace KebbiBrain
             T_Reverse_Correct();
             T_G3_MirrorCoach();
             T_G3_Session();
+            T_G3_Mirror();
             T_RobotLink();
             T_RobotLinkProtocol();
             T_RemoteBody();
@@ -174,6 +175,27 @@ namespace KebbiBrain
         }
 
         // G3 多動作 session:逐組示範+計分、組間語音切換下一組(暖身/太極/CPR);可重入。
+        // G3 左右鏡像對映:R↔L 對調、中軸不換、對合(兩次回原);非對稱動作鏡像後左右互換。
+        private static void T_G3_Mirror()
+        {
+            Check("G3鏡像-R↔L 對調", App.MirrorCoachGame.MirrorMotor(KebbiMotor.RShoulderY) == KebbiMotor.LShoulderY
+                && App.MirrorCoachGame.MirrorMotor(KebbiMotor.LElbowY) == KebbiMotor.RElbowY);
+            Check("G3鏡像-中軸 NeckZ/NeckY 不換", App.MirrorCoachGame.MirrorMotor(KebbiMotor.NeckZ) == KebbiMotor.NeckZ
+                && App.MirrorCoachGame.MirrorMotor(KebbiMotor.NeckY) == KebbiMotor.NeckY);
+            Check("G3鏡像-對合(鏡像兩次回原)",
+                App.MirrorCoachGame.MirrorMotor(App.MirrorCoachGame.MirrorMotor(KebbiMotor.RShoulderZ)) == KebbiMotor.RShoulderZ);
+
+            // 非對稱動作:只舉右手 → 鏡像後只舉左手(同角度)
+            var oneArm = new App.MirrorCoachGame.Move("舉右手");
+            oneArm.Frames.Add(new App.MirrorCoachGame.JointFrame("舉右").Set(KebbiMotor.RShoulderY, 90f));
+            var mir = App.MirrorCoachGame.MirrorMove(oneArm);
+            Check("G3鏡像-非對稱:舉右手鏡像成舉左手(LShoulderY=90)",
+                mir.Frames.Count == 1 && mir.Frames[0].Targets.Count == 1
+                && mir.Frames[0].Targets[0].Key == KebbiMotor.LShoulderY
+                && Math.Abs(mir.Frames[0].Targets[0].Value - 90f) < 0.01f);
+            Check("G3鏡像-名稱標(鏡像)", mir.Name.Contains("鏡像"));
+        }
+
         private static void T_G3_Session()
         {
             Action<string> noop = _ => { };
