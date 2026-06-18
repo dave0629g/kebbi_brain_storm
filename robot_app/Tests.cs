@@ -28,6 +28,7 @@ namespace KebbiBrain
             T_RemoteVoice();
             T_RemoteVoiceDone();
             T_LinkAwaiter();
+            T_NuwaMotorIds();
             T_Direction_Edges();
             T_HeadClamp_Edges();
             T_BodyCommand_Edges();
@@ -473,6 +474,23 @@ namespace KebbiBrain
             var t4 = awaiter.WaitForAsync((f, x) => x == "LATE", 1000);
             _ = Task.Run(async () => { await Task.Delay(20); await b.SendAsync("A", "LATE"); });
             Check("LinkAwaiter-非同步延遲回覆 await 等到", t4.GetAwaiter().GetResult() == "LATE");
+        }
+
+        // 釘住:KebbiMotor enum 值 == 真 NuwaSDK 2.1.0.08 aar 的 MOTOR_* 常數(用參考專案 UnityKebbi 內附 aar 以 javap 反查,2026-06-18)。
+        // real 後端 UnityKebbiBody 直接拿 (int)KebbiMotor 當馬達 ID 呼叫 ctlMotor/getMotorPresentPositionInDegree;
+        // 若有人改了 enum 順序/值,實機馬達就會控錯顆 → 此純 C# 測試在主控台就攔下(實機只剩角度/速度語意待必測⑥)。
+        private static void T_NuwaMotorIds()
+        {
+            Check("Nuwa馬達ID-NeckY=1(MOTOR_NECK_Y)", (int)KebbiMotor.NeckY == 1);
+            Check("Nuwa馬達ID-NeckZ=2(MOTOR_NECK_Z)", (int)KebbiMotor.NeckZ == 2);
+            Check("Nuwa馬達ID-RShoulderZ=3(MOTOR_RIGHT_SHOULDER_Z)", (int)KebbiMotor.RShoulderZ == 3);
+            Check("Nuwa馬達ID-RShoulderY=4(MOTOR_RIGHT_SHOULDER_Y)", (int)KebbiMotor.RShoulderY == 4);
+            Check("Nuwa馬達ID-RShoulderX=5(MOTOR_RIGHT_SHOULDER_X)", (int)KebbiMotor.RShoulderX == 5);
+            Check("Nuwa馬達ID-RElbowY=6(MOTOR_RIGHT_ELBOW_Y)", (int)KebbiMotor.RElbowY == 6);
+            Check("Nuwa馬達ID-LShoulderZ=7(MOTOR_LEFT_SHOULDER_Z)", (int)KebbiMotor.LShoulderZ == 7);
+            Check("Nuwa馬達ID-LShoulderY=8(MOTOR_LEFT_SHOULDER_Y)", (int)KebbiMotor.LShoulderY == 8);
+            Check("Nuwa馬達ID-LShoulderX=9(MOTOR_LEFT_SHOULDER_X)", (int)KebbiMotor.LShoulderX == 9);
+            Check("Nuwa馬達ID-LElbowY=10(MOTOR_LEFT_ELBOW_Y)", (int)KebbiMotor.LElbowY == 10);
         }
 
         // 方位扇區邊界 + 角度正規化 + 印尼語詞往返(把 G4 的方位判定逼到邊角)。

@@ -88,7 +88,8 @@ adb logcat -d | grep -iE "auth|licence|kebbi|denied|TTS|STT|OpenAI|Anthropic"
 | ⑥ NeckZ 角度範圍 | 往復 `setMotor`+`getMotor` 量上下限，填回 `UnityKebbiBody.NeckZMin/MaxDeg` | — |
 
 ## 6. 已內建（RealBackends.cs，照已驗證 REST 形狀）
-- **UnityKebbiBody**：`setMotorPositionInDegree` / `getMotorPresentPossitionInDegree` / `getDirectionOfDOA` / `move` / `turn`。
+- **UnityKebbiBody**：`ctlMotor(id,度,速)` / `getMotorPresentPositionInDegree(id)` / `getDirectionOfDOA` / `move` / `turn`。
+  > ⚠️ 已對真 NuwaSDK 2.1.0.08 aar 反查校正(2026-06-18,用參考專案 `~/Projects/UnityKebbi` 內附 aar)：早先寫的 `setMotorPositionInDegree` **不存在**(改 `ctlMotor`)、`getMotorPresentPossitionInDegree` **拼字錯**(改 `Position` 單 s)。馬達 ID = `MOTOR_*` 常數(`KebbiMotor` enum 值已驗證一致)。`ctlMotor` 的(度,速)語意仍以實機往復量測為準。
 - **UnityVoice**：Azure TTS（SSML→`riff-16khz-16bit-mono-pcm`→`WavUtil.ToAudioClip`→AudioSource）；STT（Microphone 錄 16k→`WavUtil.FromAudioClip`→Azure STT）。
 - **UnityLlm**：依金鑰前綴打 OpenAI(`/v1/chat/completions`) 或 Anthropic(`/v1/messages`)；JSON 用 `JsonUtility`（免額外套件）。
 - **UnityRobotLink**：真 **UDP 廣播**收送（同埠 50505 廣播 + 收端過濾；收到後切回主緒呼叫 handler）。框架/解析/收件判斷走 `RobotLinkProtocol`（已自測）；剩 UDP 傳輸本身待必測④。

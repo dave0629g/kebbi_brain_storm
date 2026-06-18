@@ -67,7 +67,13 @@ namespace KebbiBrain.Real
         }
     }
 
-    // ── 身體：NuwaRobotAPI（反編譯確認的 public 方法，走免授權同步管道）──
+    // ── 身體：NuwaRobotAPI（方法名已對「真 NuwaSDK 2.1.0.08 aar」反查校正，見下）──
+    //   校正來源：用參考專案 ~/Projects/UnityKebbi 內附的 NuwaSDK aar 2.1.0.08 以 javap 反查實際 public 方法(2026-06-18)。
+    //   修正：① 馬達設角無 setMotorPositionInDegree → 真 API 是 ctlMotor(motorId, degrees, speed)。
+    //         ② 讀角拼字 Possition→Position：真 API 是 getMotorPresentPositionInDegree(int)。
+    //   不變(反查確認存在)：getInst()、move(float)、turn(float)、getDirectionOfDOA()。
+    //   馬達 ID：KebbiMotor enum 值 == SDK MOTOR_* 常數(NECK_Y=1…LEFT_ELBOW_Y=10)，已驗證一致(見 T_NuwaMotorIds)。
+    //   ⚠ ctlMotor 的 (degrees,speed) 引數語意由 aar 簽章+degree 讀取器推得，仍以實機往復量測為準(必測⑥)。
     public sealed class UnityKebbiBody : IKebbiBody
     {
         private readonly AndroidJavaObject _api;
@@ -79,9 +85,9 @@ namespace KebbiBrain.Real
         }
 
         public void SetMotor(KebbiMotor m, float degrees, float speed = 50f)
-            => _api.Call("setMotorPositionInDegree", (int)m, degrees, (int)speed);
+            => _api.Call("ctlMotor", (int)m, degrees, speed); // ctlMotor(int motorId, float degrees, float speed)
         public float GetMotor(KebbiMotor m)
-            => _api.Call<float>("getMotorPresentPossitionInDegree", (int)m); // SDK 拼字 Possition
+            => _api.Call<float>("getMotorPresentPositionInDegree", (int)m);
         public float ReadDoaDegrees()
             => _api.Call<float>("getDirectionOfDOA"); // ⚠️解析度/360°/非語音未驗
 
