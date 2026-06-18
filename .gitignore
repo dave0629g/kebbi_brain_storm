@@ -1,0 +1,25 @@
+# OS / editor
+.DS_Store
+.obsidian/
+
+# Claude Code project-local state
+.claude/
+
+# .NET build output
+bin/
+obj/
+
+# 雲端測試產生的語音檔(非原始碼)
+cloud_audio_out/
+
+# Unity 金鑰(ScriptableObject .asset 會含金鑰,勿提交) + 建置產物
+**/KebbiSecrets.asset
+**/Secrets.asset
+*.apk
+*.aab
+
+# 一般金鑰/環境檔
+*.env
+.env
+*.pem
+*credentials*

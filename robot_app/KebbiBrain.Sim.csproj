@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 主控台自測專案：編譯核心邏輯 + 文字模擬器，可直接 `dotnet run`。
+       Unity 實機後端的檔案整段包在 #if UNITY 內，這個專案不會編譯它們。
+       LangVersion 鎖 9.0 以確保程式碼可直接搬進 Unity 2022.3。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>KebbiBrain</AssemblyName>
+    <RootNamespace>KebbiBrain</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>
