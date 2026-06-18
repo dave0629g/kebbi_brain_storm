@@ -222,7 +222,21 @@ namespace KebbiBrain
             log("（▶ 爭點白熱化:兩機向中央逼近——辯方機也經遠端機身命令移動）");
             await game.ApproachCenterAsync();
 
-            log("\n=== 完成 " + game.Exchanges + " 回合;辯方台詞全由『被控機自己的喇叭』說出(非中控代說) ===");
+            // ── 後記:「說完才交棒」握手(VC|DONE)── 中控送台詞 → 等被控機回 VC|DONE(播畢)→ 才往下,真機不搶拍。
+            log("\n【後記 ▶「說完才交棒」握手:中控等被控機回 VC|DONE(播畢)才繼續】");
+            var hsBus = new SimRobotBus(log);
+            Action<string> hsDevLog = s => log("      [辯方機·被控] " + s);
+            var hsDevLink = hsBus.CreateLink("辯方機-被控2");
+            new BodyCommandReceiver(hsDevLink, new SimKebbiBody(hsDevLog, canMove: true),
+                null, new SimVoice(hsDevLog), ackVoiceDone: true); // 說完回 VC|DONE
+            var hsDirLink = hsBus.CreateLink("控方機-中控2");
+            var hsAwaiter = new LinkAwaiter(hsDirLink);
+            var hsVoice = new RemoteVoiceProxy(hsDirLink, "辯方機-被控2", log, hsAwaiter, doneTimeoutMs: 1000);
+            log("控方機:請辯方機說一句…(會『等』它回報播畢才往下)");
+            await hsVoice.SpeakAsync("辯方：抗議，這違反程序正義！", "zh-TW");
+            log("控方機:已收到辯方機的 VC|DONE → 確認播畢、安全交棒,不會搶拍。");
+
+            log("\n=== 完成 " + game.Exchanges + " 回合;辯方台詞全由『被控機自己的喇叭』說出(非中控代說)、含 VC|DONE 播畢握手 ===");
             log("（實機:SimRobotBus→UnityRobotLink(UDP),被控機設 Mode=Controlled;先過必測④雙機收送）");
             log("====================================================");
         }

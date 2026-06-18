@@ -26,6 +26,7 @@ namespace KebbiBrain
             T_RobotLinkProtocol();
             T_RemoteBody();
             T_RemoteVoice();
+            T_RemoteVoiceDone();
             T_LinkAwaiter();
             T_Direction_Edges();
             T_HeadClamp_Edges();
@@ -242,10 +243,16 @@ namespace KebbiBrain
             public string LastLang => Spoken.Count > 0 ? Spoken[Spoken.Count - 1].lang : null;
             private readonly System.Collections.Generic.Queue<string> _heard = new System.Collections.Generic.Queue<string>();
             public void EnqueueHeard(string t) => _heard.Enqueue(t);
-            public System.Threading.Tasks.Task SpeakAsync(string text, string lang = "id-ID")
-            { Spoken.Add((text, lang)); return System.Threading.Tasks.Task.CompletedTask; }
-            public System.Threading.Tasks.Task<string> ListenAsync(string lang = "id-ID")
-            { return System.Threading.Tasks.Task.FromResult(_heard.Count > 0 ? _heard.Dequeue() : ""); }
+            public int SpeakDelayMs = 0; // >0 → 模擬真機 TTS 播放耗時:延遲後才記錄(代表「播畢」)
+            public Task SpeakAsync(string text, string lang = "id-ID")
+            {
+                if (SpeakDelayMs <= 0) { Spoken.Add((text, lang)); return Task.CompletedTask; }
+                return DelayedSpeakAsync(text, lang);
+            }
+            private async Task DelayedSpeakAsync(string text, string lang)
+            { await Task.Delay(SpeakDelayMs); Spoken.Add((text, lang)); }
+            public Task<string> ListenAsync(string lang = "id-ID")
+            { return Task.FromResult(_heard.Count > 0 ? _heard.Dequeue() : ""); }
         }
 
         // 遠端機身控制:中控用 RemoteBodyProxy 經 link 驅動被控機(BodyCommandReceiver 套用到本機 body)。
@@ -377,6 +384,55 @@ namespace KebbiBrain
             dir.SendAsync("INTG", "YOUR_TURN").GetAwaiter().GetResult();
             Check("遠端語音-整合:台詞套到 voice", iVoice.LastText == "辯方反駁");
             Check("遠端語音-整合:交棒訊息仍進 alsoHandle(未被誤吞)", yourTurn);
+        }
+
+        // 遠端語音「說完才交棒」握手:被控機 ackVoiceDone 播畢回 VC|DONE,中控 RemoteVoiceProxy 等播畢模式 await 到才返回。
+        // 用「延遲語音」模擬真機 TTS 播放耗時,證明 proxy 真的等到播畢(非 fire-and-forget),且逾時不卡死。純 C# 可驗(實機 UDP 必測④)。
+        private static void T_RemoteVoiceDone()
+        {
+            Action<string> noop = _ => { };
+
+            // VC|DONE 線格式往返
+            Check("握手-Done()/IsDone() 往返", VoiceCommand.IsDone(VoiceCommand.Done()) && !VoiceCommand.IsDone("VC|SAY|zh-TW|x"));
+            // TryParseSay 取出 lang/text(含 '|' 的 text 保留)
+            Check("握手-TryParseSay 取出 lang/text(含 '|')",
+                VoiceCommand.TryParseSay("VC|SAY|zh-TW|a|b", out var pl, out var px) && pl == "zh-TW" && px == "a|b");
+            Check("握手-TryParseSay 非 SAY 回 false", !VoiceCommand.TryParseSay("VC|DONE", out _, out _));
+
+            // (1) 等播畢:被控機「延遲 30ms 播放」後回 DONE → proxy await 到才返回 → 返回時 Spoken 已記錄(證明真的等了)。
+            //     此案亦涵蓋「DONE 非同步遲到」:DONE 是在 Task.Delay(30) 的 thread-pool 續接上才送回,proxy 端 await 須正確處理
+            //     非同步抵達(非 Sim 同步遞送);doneTimeoutMs:1000 ≫ 30ms,故是「等到 DONE」而非「靠逾時」。
+            var bus = new SimRobotBus(noop);
+            var dirLink = bus.CreateLink("中控");
+            var devLink = bus.CreateLink("被控");
+            var slowVoice = new RecordingVoice { SpeakDelayMs = 30 };
+            new BodyCommandReceiver(devLink, new RecordingBody(), null, slowVoice, ackVoiceDone: true);
+            var awaiter = new LinkAwaiter(dirLink);
+            var proxy = new RemoteVoiceProxy(dirLink, "被控", noop, awaiter, doneTimeoutMs: 1000);
+            proxy.SpeakAsync("辯方台詞", "zh-TW").GetAwaiter().GetResult();
+            Check("握手-等播畢:proxy 返回時被控機已說完(等到 VC|DONE)", slowVoice.LastText == "辯方台詞");
+
+            // (2) 對照 fire-and-forget(無 awaiter):送出即返回,被控機延遲播放尚未說完(LastText 還沒記錄)
+            var bus2 = new SimRobotBus(noop);
+            var dirLink2 = bus2.CreateLink("中控2");
+            var devLink2 = bus2.CreateLink("被控2");
+            var slow2 = new RecordingVoice { SpeakDelayMs = 50 };
+            new BodyCommandReceiver(devLink2, new RecordingBody(), null, slow2); // ackVoiceDone 預設 false
+            var ff = new RemoteVoiceProxy(dirLink2, "被控2", noop);              // 無 awaiter → fire-and-forget
+            ff.SpeakAsync("x", "zh-TW").GetAwaiter().GetResult();
+            Check("握手-對照:fire-and-forget 不等播畢(返回時尚未說完)", slow2.LastText == null);
+
+            // (3) 逾時不卡死:等播畢模式但被控機不回 DONE(ackVoiceDone:false) → proxy 短逾時後仍返回(不 hang)
+            var bus3 = new SimRobotBus(noop);
+            var dirLink3 = bus3.CreateLink("中控3");
+            var devLink3 = bus3.CreateLink("被控3");
+            new BodyCommandReceiver(devLink3, new RecordingBody(), null, new RecordingVoice()); // 不 ack
+            var awaiter3 = new LinkAwaiter(dirLink3);
+            var proxy3 = new RemoteVoiceProxy(dirLink3, "被控3", noop, awaiter3, doneTimeoutMs: 30);
+            bool returned = false;
+            proxy3.SpeakAsync("無人回 DONE", "zh-TW").GetAwaiter().GetResult();
+            returned = true;
+            Check("握手-逾時不卡死:被控機不回 DONE 也能返回", returned);
         }
 
         // LinkAwaiter:在 IRobotLink 上「送出→await 等符合條件的回覆、帶逾時」。多機編排(FinaleShowGame)的真機正確性基礎。
