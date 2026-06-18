@@ -31,6 +31,7 @@ namespace KebbiBrain
             T_G2_GeometryRelay();
             T_G5_Debate();
             T_G1_RelayQuest();
+            T_Finale();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -486,6 +487,94 @@ namespace KebbiBrain
             var g2 = new App.RelayQuestGame(bodyA2, bus2.CreateLink("A2"), bodyB2, bus2.CreateLink("B2"), noop);
             g2.RunProgramAsync(new System.Collections.Generic.List<string> { "FWD", "GOAL" }).GetAwaiter().GetResult();
             Check("G1-未交棒就 GOAL → 不算抵達", !g2.ReachedGoal);
+        }
+
+        // 合體彩蛋編排:中控依序 cue 各站,站離線/卡住→降級跳過,壓軸全體同步。
+        // 純 C# 可驗(實機 UDP 非同步,跳過判定需改 await 逾時 → 見 進度追蹤 BLOCKED)。
+        private static void T_Finale()
+        {
+            Action<string> noop = _ => { };
+
+            // 建一個「在場站台」節點:收 CUE→回 ACK(+可選 DONE);收 FINALE→走位+舉手。回傳該站機身供斷言。
+            RecordingBody MakeStation(SimRobotBus bus, string id, bool ack, bool done)
+            {
+                var body = new RecordingBody();
+                var link = bus.CreateLink(id);
+                link.OnMessage((from, t) =>
+                {
+                    if (t.StartsWith("CUE|"))
+                    {
+                        string role = t.Substring(4);
+                        if (ack) link.SendAsync(from, "ACK|" + role);
+                        if (done) link.SendAsync(from, "DONE|" + role);
+                    }
+                    else if (t == "FINALE")
+                    {
+                        body.Move(0.1f); body.StopWheels();
+                        body.SetMotor(KebbiMotor.RShoulderY, 100f);
+                    }
+                });
+                return body;
+            }
+
+            // 情境 1:三站全到 → 跑 3、跳 0、壓軸,各站與中控都舉手到 100、在場站走位中央
+            var bus = new SimRobotBus(noop);
+            var hostBody = new RecordingBody();
+            var g2 = MakeStation(bus, "G2-站機", ack: true, done: true);
+            var g3 = MakeStation(bus, "G3-站機", ack: true, done: true);
+            MakeStation(bus, "G5-夥伴機", ack: true, done: true);
+            var game = new App.FinaleShowGame(bus.CreateLink("中控導演機"), hostBody, noop);
+            game.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            Check("彩蛋-三站全到:跑了 3 站", game.StationsRun == 3);
+            Check("彩蛋-三站全到:跳過 0 站", game.StationsSkipped == 0);
+            Check("彩蛋-壓軸達成", game.FinaleReached);
+            Check("彩蛋-FINALE 讓在場站台舉手(G2=100)", Math.Abs(g2.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+            Check("彩蛋-在場站台走位中央(G3 有 Move)", Math.Abs(g3.LastMove - 0.1f) < 0.01f);
+            Check("彩蛋-中控自己收尾舉手(host=100)", Math.Abs(hostBody.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+
+            // 情境 2:G3 站離線(不建該節點)→ 跳過 G3,其餘照跑,壓軸照常
+            var bus2 = new SimRobotBus(noop);
+            var hostBody2 = new RecordingBody();
+            MakeStation(bus2, "G2-站機", true, true);
+            MakeStation(bus2, "G5-夥伴機", true, true);   // 故意不建 "G3-站機" → 離線
+            var game2 = new App.FinaleShowGame(bus2.CreateLink("中控導演機"), hostBody2, noop);
+            game2.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            Check("彩蛋-一站離線:跑了 2 站", game2.StationsRun == 2);
+            Check("彩蛋-一站離線:跳過 1 站(降級)", game2.StationsSkipped == 1);
+            Check("彩蛋-一站離線:壓軸仍達成", game2.FinaleReached);
+
+            // 情境 3:G2 站卡住(回 ACK 但不回 DONE)→ 也跳過(不卡死全場),壓軸照常
+            var bus3 = new SimRobotBus(noop);
+            var hostBody3 = new RecordingBody();
+            MakeStation(bus3, "G2-站機", ack: true, done: false); // 卡住:開始了沒回完成
+            MakeStation(bus3, "G3-站機", true, true);
+            MakeStation(bus3, "G5-夥伴機", true, true);
+            var game3 = new App.FinaleShowGame(bus3.CreateLink("中控導演機"), hostBody3, noop);
+            game3.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            Check("彩蛋-一站卡住(ACK 無 DONE):跑了 2 站", game3.StationsRun == 2);
+            Check("彩蛋-一站卡住:跳過 1 站", game3.StationsSkipped == 1);
+            Check("彩蛋-一站卡住:壓軸仍達成", game3.FinaleReached);
+
+            // 情境 4:全站離線 → 跑 0、跳 3,壓軸仍達成(中控獨撐收尾,降級不崩)
+            var bus4 = new SimRobotBus(noop);
+            var hostBody4 = new RecordingBody();
+            var game4 = new App.FinaleShowGame(bus4.CreateLink("中控導演機"), hostBody4, noop);
+            game4.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            Check("彩蛋-全站離線:跑了 0 站", game4.StationsRun == 0);
+            Check("彩蛋-全站離線:跳過 3 站", game4.StationsSkipped == 3);
+            Check("彩蛋-全站離線:壓軸仍達成(中控獨撐收尾)",
+                game4.FinaleReached && Math.Abs(hostBody4.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+
+            // 情境 5(可重入):同一實例連跑兩場 → 計數不跨場累加(每場歸零),仍為該場的 3 跑/0 跳
+            var bus5 = new SimRobotBus(noop);
+            var hostBody5 = new RecordingBody();
+            MakeStation(bus5, "G2-站機", true, true);
+            MakeStation(bus5, "G3-站機", true, true);
+            MakeStation(bus5, "G5-夥伴機", true, true);
+            var game5 = new App.FinaleShowGame(bus5.CreateLink("中控導演機"), hostBody5, noop);
+            game5.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            game5.RunShowAsync(App.FinaleShowGame.MakeDefaultLineup()).GetAwaiter().GetResult();
+            Check("彩蛋-可重入:第二場計數歸零不累加(跑 3 非 6)", game5.StationsRun == 3 && game5.StationsSkipped == 0);
         }
     }
 }

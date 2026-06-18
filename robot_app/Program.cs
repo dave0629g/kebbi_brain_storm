@@ -33,6 +33,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--rv") >= 0) { await PlayRemoteVoiceDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--finale") >= 0) { await PlayFinaleDemoAsync(); return 0; }
+
 #if !UNITY
             if (cloudTest) return await Cloud.CloudCheck.RunAsync(Console.WriteLine);
 #endif
@@ -59,6 +61,7 @@ namespace KebbiBrain
             Console.WriteLine("  --g5              G5 法庭辯論劇場");
             Console.WriteLine("  --link            多機協作(雙機交棒 + 合體彩蛋廣播)");
             Console.WriteLine("  --rv              示範:多機遠端語音(被控機用自己的喇叭說台詞 + 手勢)");
+            Console.WriteLine("  --finale          示範:合體彩蛋多機接力大舞台(含離線站降級跳過)");
             Console.WriteLine("  --test            跑自我測試(全綠)");
             Console.WriteLine("  --cloud-test      雲端自測(需 Azure/OpenAI 金鑰)");
             Console.WriteLine("  --target cloudsim 真雲端跑 G4 整場 Demo(需金鑰)");
@@ -221,6 +224,65 @@ namespace KebbiBrain
 
             log("\n=== 完成 " + game.Exchanges + " 回合;辯方台詞全由『被控機自己的喇叭』說出(非中控代說) ===");
             log("（實機:SimRobotBus→UnityRobotLink(UDP),被控機設 Mode=Controlled;先過必測④雙機收送）");
+            log("====================================================");
+        }
+
+        // 示範小遊戲:合體彩蛋《凱比聯合學園祭・多機接力大舞台》——中控導演機指揮多站接力,含「降級備案」(離線站自動跳過)。
+        // 對應 合體彩蛋_G2G3G5_多機協作.md;FinaleShowGame 編排邏輯純 C# 已自測,實機換 UnityRobotLink(UDP)同款。
+        private static async Task PlayFinaleDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+
+            // 建一個「在場站台」:收 CUE→演出(印一行+舉手)→回 ACK/DONE;收 FINALE→走位中央+同步舉手。
+            void Station(SimRobotBus bus, string id, string perform)
+            {
+                Action<string> sLog = s => log("      [" + id + "] " + s);
+                var body = new SimKebbiBody(sLog, canMove: true);
+                var link = bus.CreateLink(id);
+                link.OnMessage((from, t) =>
+                {
+                    if (t.StartsWith("CUE|"))
+                    {
+                        string role = t.Substring(4);
+                        sLog("🎭 " + perform);
+                        body.SetMotor(KebbiMotor.RShoulderY, 60f);
+                        link.SendAsync(from, "ACK|" + role);
+                        link.SendAsync(from, "DONE|" + role);
+                    }
+                    else if (t == "FINALE")
+                    {
+                        sLog("→ 走位舞台中央 + 同步勝利動作");
+                        body.Move(0.1f); body.StopWheels();
+                        body.SetMotor(KebbiMotor.RShoulderY, 100f);
+                    }
+                });
+            }
+
+            log("========== 示範:合體彩蛋《凱比聯合學園祭・多機接力大舞台》 ==========");
+            log("（中控導演機指揮 G2/G3/G5 三站接力,壓軸全體同步;任一站離線→自動跳過降級）\n");
+
+            // ── 第一場:三站全到的完美接力 ──
+            log("【第一場 ▶ 三站全到】");
+            var busA = new SimRobotBus(log);
+            Station(busA, "G2-站機", "觀眾上台解一步幾何,兩機說—走—指演示證明");
+            Station(busA, "G3-站機", "帶全場做 30 秒體感律動");
+            Station(busA, "G5-夥伴機", "與中控在中央做對峙接力,帶到高潮");
+            var hostA = new SimKebbiBody(s => log("      [中控導演機] " + s), canMove: true);
+            var showA = new FinaleShowGame(busA.CreateLink("中控導演機"), hostA, log);
+            await showA.RunShowAsync(FinaleShowGame.MakeDefaultLineup());
+
+            // ── 第二場:G5 夥伴機臨時離線 → 降級備案 ──
+            log("\n【第二場 ▶ 降級備案:G5 夥伴機臨時離線】");
+            var busB = new SimRobotBus(log);
+            Station(busB, "G2-站機", "觀眾上台解一步幾何");
+            Station(busB, "G3-站機", "帶全場做體感律動");
+            // 故意不建 "G5-夥伴機" → 離線,示範中控自動跳過
+            var hostB = new SimKebbiBody(s => log("      [中控導演機] " + s), canMove: true);
+            var showB = new FinaleShowGame(busB.CreateLink("中控導演機"), hostB, log);
+            await showB.RunShowAsync(FinaleShowGame.MakeDefaultLineup());
+
+            log("\n=== 重點:第二場 G5 站離線,中控『自動跳過』續跑、壓軸照常 —— 合體翻車不拖垮全場 ===");
+            log("（實機:SimRobotBus→UnityRobotLink(UDP);跳過判定需改 await ACK 帶逾時,見 進度追蹤 BLOCKED）");
             log("====================================================");
         }
 
