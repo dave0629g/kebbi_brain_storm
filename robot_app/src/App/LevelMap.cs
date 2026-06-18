@@ -15,6 +15,10 @@ namespace KebbiBrain.App
         public int StartC { get; }
         public int GoalR { get; }
         public int GoalC { get; }
+        public int HandoffR { get; } = -1;   // 交接點(H);-1=本關不設交接點 → 不啟用同步檢查(向後相容)
+        public int HandoffC { get; } = -1;
+        public bool HasHandoffPoint => HandoffR >= 0;
+        public bool IsHandoffPoint(int r, int c) => HasHandoffPoint && r == HandoffR && c == HandoffC;
 
         public LevelMap(string[] rows)
         {
@@ -24,6 +28,7 @@ namespace KebbiBrain.App
                 {
                     if (_g[r][c] == 'S') { StartR = r; StartC = c; }
                     else if (_g[r][c] == 'G') { GoalR = r; GoalC = c; }
+                    else if (_g[r][c] == 'H') { HandoffR = r; HandoffC = c; } // 交接點(可走的空地,IsObstacle 不算障礙)
                 }
         }
 
@@ -65,7 +70,7 @@ namespace KebbiBrain.App
                     sb.Append((i == r && j == c) ? who : _g[i][j]).Append(' ');
                 sb.Append('\n');
             }
-            sb.Append("      (S起點 G終點 #障礙 *寶物 .空地 ").Append(who).Append("=機器人)");
+            sb.Append("      (S起點 G終點 H交接點 #障礙 *寶物 .空地 ").Append(who).Append("=機器人)");
             return sb.ToString();
         }
 
@@ -87,5 +92,19 @@ namespace KebbiBrain.App
         public static List<string> SmartProgram() =>
             new List<string> { "FWD", "IF_OBSTACLE", "RIGHT", "FWD", "LEFT", "ENDIF",
                                "HANDOFF", "RIGHT", "FWD", "LEFT", "FWD", "GOAL" };
+
+        // ── 關卡2(難度↑:轉彎走廊 + 交接點 H)──
+        //   S . . H        A 直走到 H(0,3) 站對交接點才能交棒;B 右轉下繞到 G。
+        //   . # # .
+        //   . . . G
+        public static LevelMap Level2() => new LevelMap(new[] { "S..H", ".##.", "...G" });
+
+        // 正解:A 走到交接點 H 才 HANDOFF → 交棒成功,B 下繞到 G。
+        public static List<string> Level2DetourProgram() =>
+            new List<string> { "FWD", "FWD", "FWD", "HANDOFF", "RIGHT", "FWD", "FWD", "GOAL" };
+
+        // 反例:A 只走 1 格(沒到交接點)就 HANDOFF → 交棒失敗(B 不啟動),最後 GOAL 因沒交棒而失敗。
+        public static List<string> Level2HandoffTooEarlyProgram() =>
+            new List<string> { "FWD", "HANDOFF", "FWD", "GOAL" };
     }
 }

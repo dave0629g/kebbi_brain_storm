@@ -156,7 +156,8 @@ namespace KebbiBrain
             {
                 var bus = new SimRobotBus(log);
                 return new RelayQuestGame(new SimKebbiBody(log, true), bus.CreateLink("Kebbi-A"),
-                    new SimKebbiBody(log, true), bus.CreateLink("Kebbi-B"), log, map);
+                    new SimKebbiBody(log, true), bus.CreateLink("Kebbi-B"), log, map,
+                    new SimVoice(log), new SimVoice(log)); // 交棒「換你/收到」語音 + 舉手手勢
             }
 
             log("========== G1《雙機接力闖關》Demo（指令序列 → 雙機接力 + 避障） ==========");
@@ -179,7 +180,27 @@ namespace KebbiBrain
             await g3.RunProgramAsync(LevelMap.SmartProgram());
             log("→ 結果：抵達=" + g3.ReachedGoal + "（程式自動判斷避障，不用人工算路線）");
 
-            log("\n=== 重點：改指令 → 撞牆失敗 vs 繞行成功（即時因果回饋）；結算累計嘗試/撞牆並給效率星等 ===");
+            // 關卡2(轉彎走廊 + 交接點 H):示範「站對交接點才能交棒」的同步條件。
+            var map2 = LevelMap.Level2();
+            RelayQuestGame NewGame2()
+            {
+                var bus = new SimRobotBus(log);
+                return new RelayQuestGame(new SimKebbiBody(log, true), bus.CreateLink("Kebbi-A"),
+                    new SimKebbiBody(log, true), bus.CreateLink("Kebbi-B"), log, map2,
+                    new SimVoice(log), new SimVoice(log));
+            }
+            log("\n【關卡2 ▶ 交接點同步條件(H=交接點，A 要走到 H 才能交棒)】");
+            log(map2.Render(map2.StartR, map2.StartC, 'A'));
+            log("— 反例：A 只走 1 格就交棒 —");
+            var e = NewGame2();
+            await e.RunProgramAsync(LevelMap.Level2HandoffTooEarlyProgram());
+            log("→ 交棒失敗=" + e.HandoffFailed + "、抵達=" + e.ReachedGoal + "（沒站對交接點，B 不啟動）");
+            log("— 正解：A 走到 H 才交棒（含『換你/收到』語音+舉手） —");
+            var s = NewGame2();
+            await s.RunProgramAsync(LevelMap.Level2DetourProgram());
+            log("→ 交棒失敗=" + s.HandoffFailed + "、抵達=" + s.ReachedGoal + " 🎉");
+
+            log("\n=== 重點：撞牆失敗vs繞行成功、效率星等結算、交接點同步(站對才交棒)、交棒換你語音+舉手手勢 ===");
             log("====================================================");
         }
 

@@ -42,6 +42,8 @@ namespace KebbiBrain
             T_G1_RelayQuest();
             T_G1_Obstacle();
             T_G1_Score();
+            T_G1_Handoff();
+            T_G1_HandoffSync();
             T_Finale();
             T_G5_Trial();
             T_G4_Judge();
@@ -730,6 +732,60 @@ namespace KebbiBrain
             r.RunDebateAsync(App.DebateGame.MakeGalileoDebate()).GetAwaiter().GetResult();
             r.RunDebateAsync(App.DebateGame.MakeGalileoDebate()).GetAwaiter().GetResult();
             Check("G5計分-可重入:第二場票數歸零不累加(辯5 非 10、2 回合)", r.DefVotes == 5 && r.Exchanges == 2);
+        }
+
+        // G1 交棒「換你」語音 + 舉手手勢(注入 voiceA/voiceB)。null=不啟用(向後相容)。
+        private static void T_G1_Handoff()
+        {
+            Action<string> noop = _ => { };
+            var bodyA = new SimKebbiBody(noop, true); var bodyB = new SimKebbiBody(noop, true);
+            var bus = new SimRobotBus(noop);
+            var vA = new RecordingVoice(); var vB = new RecordingVoice();
+            var game = new App.RelayQuestGame(bodyA, bus.CreateLink("A機"), bodyB, bus.CreateLink("B機"), noop, null, vA, vB);
+            game.RunProgramAsync(App.RelayQuestGame.MakeSampleProgram()).GetAwaiter().GetResult();
+            Check("G1交棒手勢-仍正常交棒到 B、抵達", game.OnRobotB && game.ReachedGoal);
+            Check("G1交棒手勢-A 說『換你』", vA.Spoken.Exists(x => x.text != null && x.text.Contains("換你")));
+            Check("G1交棒手勢-B 說『收到』", vB.Spoken.Exists(x => x.text != null && x.text.Contains("收到")));
+            Check("G1交棒手勢-終點雙機舉手(GOAL 後 B=100,放手不破壞勝利手勢)",
+                Math.Abs(bodyB.GetMotor(KebbiMotor.RShoulderY) - 100f) < 0.01f);
+
+            // 單邊注入容錯:只 voiceA → 不丟例外、仍交棒抵達
+            var g2 = new App.RelayQuestGame(new SimKebbiBody(noop, true), bus.CreateLink("A2"),
+                new SimKebbiBody(noop, true), bus.CreateLink("B2"), noop, null, new RecordingVoice(), null);
+            g2.RunProgramAsync(App.RelayQuestGame.MakeSampleProgram()).GetAwaiter().GetResult();
+            Check("G1交棒手勢-單邊注入 voiceA 仍交棒抵達", g2.OnRobotB && g2.ReachedGoal);
+        }
+
+        // G1 交接點同步條件(Level2 有 H):A 沒走到交接點就 HANDOFF=交棒失敗、B 不啟動。
+        private static void T_G1_HandoffSync()
+        {
+            Action<string> noop = _ => { };
+            var map = App.LevelMap.Level2();
+            Check("G1交接點-Level2 有交接點 H(0,3)", map.HasHandoffPoint && map.IsHandoffPoint(0, 3));
+            RelayQuestGame NewGame()
+            {
+                var bus = new SimRobotBus(noop);
+                return new App.RelayQuestGame(new SimKebbiBody(noop, true), bus.CreateLink("A機"),
+                    new SimKebbiBody(noop, true), bus.CreateLink("B機"), noop, map);
+            }
+
+            // 太早交棒(沒走到 H)→ 交棒失敗、B 不啟動、未抵達
+            var early = NewGame();
+            early.RunProgramAsync(App.LevelMap.Level2HandoffTooEarlyProgram()).GetAwaiter().GetResult();
+            Check("G1交接點-太早交棒:HandoffFailed=true、B 沒啟動、未抵達",
+                early.HandoffFailed && !early.OnRobotB && !early.ReachedGoal);
+
+            // 站對交接點 H 才交棒 → 成功、抵達、沒交棒失敗
+            var ok = NewGame();
+            ok.RunProgramAsync(App.LevelMap.Level2DetourProgram()).GetAwaiter().GetResult();
+            Check("G1交接點-站對 H 交棒:成功交棒、抵達、無 HandoffFailed",
+                ok.OnRobotB && ok.ReachedGoal && !ok.HandoffFailed);
+
+            // 可重入:同實例先太早(失敗)後正解(成功)→ 第二次 HandoffFailed 歸零、抵達
+            var reuse = NewGame();
+            reuse.RunProgramAsync(App.LevelMap.Level2HandoffTooEarlyProgram()).GetAwaiter().GetResult();
+            reuse.RunProgramAsync(App.LevelMap.Level2DetourProgram()).GetAwaiter().GetResult();
+            Check("G1交接點-可重入:第二次正解 HandoffFailed 歸零、抵達", !reuse.HandoffFailed && reuse.ReachedGoal);
         }
 
         private static void T_G1_RelayQuest()

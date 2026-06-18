@@ -21,6 +21,7 @@ namespace KebbiBrain.App
         private readonly IKebbiBody _bodyA, _bodyB;
         private readonly IRobotLink _linkA, _linkB;
         private readonly LevelMap _map;          // null = 無地圖(舊行為)
+        private readonly IVoice _voiceA, _voiceB; // 交棒語音(null=不啟用,向後相容)
         private readonly Action<string> _log;
         private bool _bReady;
         private int _r, _c, _heading;            // 目前格位與朝向(有地圖時有效)
@@ -32,18 +33,21 @@ namespace KebbiBrain.App
         public int Attempts { get; private set; }      // 累計嘗試次數(同一實例 RunProgram 幾次;不隨 Reset 歸零)
         public int TotalCrashes { get; private set; }  // 累計撞牆次數(跨嘗試;每次嘗試最多 +1)
         public int Stars { get; private set; }         // 本次效率星等(0~3:走越接近最短路徑越多星)
+        public bool HandoffFailed { get; private set; } // 本次是否「沒走到交接點就交棒」(有設交接點 H 的關卡才會觸發)
 
+        // voiceA/voiceB:交棒「換你/收到」語音(可選,放尾端;null=不啟用,既有 5/6 參數呼叫不受影響)。
         public RelayQuestGame(IKebbiBody bodyA, IRobotLink linkA, IKebbiBody bodyB, IRobotLink linkB,
-                              Action<string> log, LevelMap map = null)
+                              Action<string> log, LevelMap map = null, IVoice voiceA = null, IVoice voiceB = null)
         {
             _bodyA = bodyA; _linkA = linkA; _bodyB = bodyB; _linkB = linkB; _map = map; _log = log ?? Console.WriteLine;
+            _voiceA = voiceA; _voiceB = voiceB;
             _linkB.OnMessage((from, t) => { if (t == "GO") _bReady = true; });
         }
 
         // 重置「本次」狀態(可重入:同一關卡可連跑多份程式;Attempts/TotalCrashes 累計不歸零,供結算)。
         public void Reset()
         {
-            Steps = 0; ReachedGoal = false; OnRobotB = false; Crashed = false; Stars = 0; _bReady = false;
+            Steps = 0; ReachedGoal = false; OnRobotB = false; Crashed = false; Stars = 0; HandoffFailed = false; _bReady = false;
             if (_map != null) { _r = _map.StartR; _c = _map.StartC; _heading = 1; } // 起點、面向東(+col)
         }
 
@@ -82,9 +86,32 @@ namespace KebbiBrain.App
                     case "ENDIF":
                         break; // 區塊結束,no-op
                     case "HANDOFF":
+                        // 交接點同步條件:有設交接點(H)的關卡,A 必須站在交接點才能交棒(沒到=交棒失敗、B 不啟動)。
+                        if (_map != null && _map.HasHandoffPoint && !_map.IsHandoffPoint(_r, _c))
+                        {
+                            HandoffFailed = true;
+                            _log("   ⚠ " + activeName + " 還沒走到交接點(H)就交棒 → 交棒失敗，B 不啟動（回去改積木）");
+                            break;
+                        }
                         _bReady = false;
+                        if (_voiceA != null) // A 舉手比「換你」+ 語音示意(手勢先於送訊息,貼合手冊)
+                        {
+                            active.SetMotor(KebbiMotor.RShoulderY, 100f);
+                            _log("   ✋ " + _linkA.RobotId + " 舉手比『換你』");
+                            await _voiceA.SpeakAsync("換你！", "zh-TW");
+                        }
                         await _linkA.SendAsync(_linkB.RobotId, "GO");
-                        if (_bReady) { OnRobotB = true; active = _bodyB; activeName = _linkB.RobotId; _log("   🤝 " + _linkA.RobotId + " 交棒 → " + _linkB.RobotId + " 接力"); }
+                        if (_bReady)
+                        {
+                            OnRobotB = true; active = _bodyB; activeName = _linkB.RobotId;
+                            if (_voiceB != null) // B 回應 + A 放下手(避免殘留舉手姿態)
+                            {
+                                await _voiceB.SpeakAsync("收到，換我！", "zh-TW");
+                                _bodyA.SetMotor(KebbiMotor.RShoulderY, 0f);
+                                _log("   👌 " + _linkB.RobotId + " 收到、" + _linkA.RobotId + " 放下手");
+                            }
+                            _log("   🤝 " + _linkA.RobotId + " 交棒 → " + _linkB.RobotId + " 接力");
+                        }
                         break;
                     case "GOAL":
                         bool ok = _map == null ? OnRobotB : (OnRobotB && !Crashed && _map.IsGoal(_r, _c));
