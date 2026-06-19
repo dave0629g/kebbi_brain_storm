@@ -139,6 +139,9 @@ namespace KebbiBrain.Real
                 if (req.result != UnityWebRequest.Result.Success) { Debug.LogError("Azure TTS: " + req.error); return; }
                 var clip = WavUtil.ToAudioClip(req.downloadHandler.data);
                 var src = Speaker(); src.clip = clip; src.Play();
+                // 等播畢才返回:多機對話/辯論的「說完才交棒」要精準——對方據此才知道「我停下來了」才開口。
+                float dur = clip != null ? clip.length : 0f;
+                if (dur > 0f) await System.Threading.Tasks.Task.Delay((int)(dur * 1000f) + 120);
             }
         }
 

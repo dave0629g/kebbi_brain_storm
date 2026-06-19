@@ -27,6 +27,7 @@ public static class KebbiBuild
     public static void BuildControlledApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-controlled-arm64.apk", mode: KebbiAppBehaviour.Mode.Controlled);
     public static void BuildG5DirectorApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-g5director-arm64.apk", mode: KebbiAppBehaviour.Mode.G5Director);
     public static void BuildG2DirectorApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-g2director-arm64.apk", mode: KebbiAppBehaviour.Mode.G2Director);
+    public static void BuildConverseApk()   => Build(useRealRobotApi: false, apk: "Build/kebbi-converse-arm64.apk", mode: KebbiAppBehaviour.Mode.Converse);
 
     private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
     {
@@ -52,6 +53,13 @@ public static class KebbiBuild
         if (!string.IsNullOrEmpty(rid)) kab.robotId = rid;
         var prid = System.Environment.GetEnvironmentVariable("KEBBI_PEER_ROBOT_ID");  // Director 要驅動的被控機 ID,可空=預設 Kebbi-B
         if (!string.IsNullOrEmpty(prid)) kab.peerRobotId = prid;
+        // Converse 對話模式的人格/開場(可空=用預設)
+        var pn = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_NAME");
+        if (!string.IsNullOrEmpty(pn)) kab.personaName = pn;
+        var pc = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_CHAR");
+        if (!string.IsNullOrEmpty(pc)) kab.personaCharacter = pc;
+        kab.peerName = System.Environment.GetEnvironmentVariable("KEBBI_PEER_NAME") ?? "";
+        kab.converseStarter = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_STARTER") ?? "") == "1";
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
         go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
         EditorSceneManager.SaveScene(scene, scenePath);

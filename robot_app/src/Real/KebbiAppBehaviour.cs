@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -36,6 +36,12 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     public string peerRobotId = "Kebbi-B";  // G1Director 要驅動的被控機 ID
     public string peerIp = "";              // 對方 IP(逗號分隔多台)。WiFi AP 丟廣播時靠 unicast 直連;空=純廣播
     public float pingIntervalSec = 2f;       // LinkPingTest 用
+
+    [Header("Converse 對話模式(兩台印尼語對話)")]
+    public string personaName = "Andi";                 // 本機角色名
+    public string personaCharacter = "periang dan ramah."; // 本機人格描述(餵 LLM)
+    public string peerName = "";                        // 對方角色名(顯示用;空=用 peerRobotId)
+    public bool converseStarter = false;                // true=本機先開口
 
     private readonly CancellationTokenSource _life = new CancellationTokenSource();
     private UnityRobotLink _link;
@@ -55,6 +61,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.G5Director: await RunG5DirectorAsync(); break;
             case Mode.G2Director: await RunG2DirectorAsync(); break;
             case Mode.Controlled: RunControlled(); break;
+            case Mode.Converse: await RunConverseAsync(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -164,6 +171,22 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             (from, t) => Debug.Log("[Controlled] 非命令訊息(" + from + "): " + t),
             ctx.Voice);
         Debug.Log("[Controlled] " + robotId + " 待命:收到中控機身/語音命令即執行(保持 app 在前景)。");
+    }
+
+    // ── 兩台印尼語對話(各有人格;靠「說完才交棒」的完成信號一來一往)──
+    // 兩台各跑此模式、robotId/peerRobotId 互指、其中一台 converseStarter=true 先開口。
+    // 用真 LLM 生印尼語人格台詞、真 TTS 說(UnityVoice 已等播畢)、UnityRobotLink unicast 交棒。
+    private async Task RunConverseAsync()
+    {
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
+        _link = realLink;
+        var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
+        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = "id-ID" };
+        var game = new ConversationGame(ctx.Voice, ctx.Llm, realLink, me, peerRobotId,
+                                        string.IsNullOrEmpty(peerName) ? peerRobotId : peerName, Debug.Log);
+        Debug.Log("[Converse] " + personaName + "(" + robotId + ")↔" + peerRobotId +
+                  "(" + me.Lang + ")," + (converseStarter ? "我先說" : "等對方先說"));
+        await game.RunAsync(converseStarter, maxTurns: 0); // 0=持續對話直到 app 關
     }
 
     // peerIp 欄位("1.2.3.4" 或逗號分隔多台)→ 去空白/空項的陣列;空則回 null(純廣播)。
