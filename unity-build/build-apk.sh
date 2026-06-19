@@ -19,8 +19,9 @@ LOG="${KEBBI_BUILD_LOG:-/tmp/kebbi-build.log}"
 case "${1:-middleware}" in
   middleware) METHOD="KebbiBuild.BuildMiddlewareApk" ;;
   real)       METHOD="KebbiBuild.BuildApk" ;;
+  linkping)   METHOD="KebbiBuild.BuildLinkPingApk" ;;   # 雙機 UDP 廣播驗證(必測④ 送出端)
   verify)     METHOD="KebbiBuild.VerifySecretsRoundTrip" ;;
-  *) echo "用法: $0 [middleware|real|verify]"; exit 2 ;;
+  *) echo "用法: $0 [middleware|real|linkping|verify]"; exit 2 ;;
 esac
 
 # 只檢查「有無」金鑰，不印值

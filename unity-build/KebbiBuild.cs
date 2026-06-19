@@ -22,8 +22,9 @@ public static class KebbiBuild
 
     public static void BuildApk()           => Build(useRealRobotApi: true,  apk: "Build/kebbi-arm64.apk");
     public static void BuildMiddlewareApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-middleware-arm64.apk");
+    public static void BuildLinkPingApk()   => Build(useRealRobotApi: false, apk: "Build/kebbi-linkping-arm64.apk", mode: KebbiAppBehaviour.Mode.LinkPingTest);
 
-    private static void Build(bool useRealRobotApi, string apk)
+    private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
     {
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.kebbibrain.app");
         PlayerSettings.productName = "KebbiBrain";
@@ -41,6 +42,7 @@ public static class KebbiBuild
         var go = new GameObject("Kebbi");
         var kab = go.AddComponent<KebbiAppBehaviour>();
         kab.useRealRobotApi = useRealRobotApi; // false → 一般 Android 當模擬器測 middleware(body=SimKebbiBody)
+        kab.mode = mode;                       // LinkPingTest=驗 UDP 廣播;預設 G4_TebakArah
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
         EditorSceneManager.SaveScene(scene, scenePath);
 
