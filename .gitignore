@@ -23,3 +23,6 @@ cloud_audio_out/
 .env
 *.pem
 *credentials*
+
+# 絕不提交填了金鑰的 KebbiSecrets.asset(範本 .template 為空、可提交)
+**/KebbiSecrets.asset

@@ -75,18 +75,15 @@ new KebbiBrain.Hardware.BodyCommandReceiver(link, body); // 收到 BC|… 命令
   ⚠️ **AVD 模擬器彼此網路隔離(NAT)，UDP 廣播多半互通不到** → 多機請用真手機；模擬器只適合單機測。
 - DOA 在階2 沒有真麥陣列 → 用螢幕按鈕/腳本設 `SimKebbiBody.CurrentDoa` 餵值（測試 UI 待補）。
 
-## 4. Build（已可用 batchmode 一鍵出，KebbiBrainUnity 已驗證）
+## 4. Build（用 `unity-build/build-apk.sh`，金鑰從 env 安全注入）
+> 🔐 金鑰只走 env → Unity 記憶體 → `KebbiSecrets.asset` → APK，build 後 asset 自動清空；腳本/log 看不到 key。詳見 `unity-build/README.md`。
 ```bash
-UNITY="/Applications/Unity/Hub/Editor/2022.3.62f3/Unity.app/Contents/MacOS/Unity"
-PROJ=~/Projects/KebbiBrainUnity
-# ⚠️ 同專案第二次 batchmode 會卡在「Loaded All Assemblies」→ 每次 build 前清快取強制完整匯入：
-rm -rf "$PROJ"/{Library,Temp,Logs}
-# 中介版(useRealRobotApi=false，跑一般 Android 測語音/LLM/UI/UDP)：
-"$UNITY" -batchmode -quit -projectPath "$PROJ" -buildTarget Android \
-  -executeMethod KebbiBuild.BuildMiddlewareApk -logFile /tmp/kbu.log
-# 真機版(useRealRobotApi=true，上真凱比)：-executeMethod KebbiBuild.BuildApk
-grep -E "error CS|Exiting batchmode|Build succeeded" /tmp/kbu.log
-# 產出：$PROJ/Build/kebbi-middleware-arm64.apk（或 kebbi-arm64.apk）。約 8~9 分鐘、需關 sandbox、磁碟 ≥3GB。
+export KEBBI_SPEECH_KEY=...  KEBBI_SPEECH_REGION=southeastasia  KEBBI_LLM_KEY=...
+./unity-build/build-apk.sh verify        # 只驗 env→asset→clear（~1-2 分，不 build）
+./unity-build/build-apk.sh middleware     # 中介版 APK（一般 Android 測 TTS/STT/LLM/UI）
+./unity-build/build-apk.sh real           # 真機版 APK（真凱比）
+# 產出：~/Projects/KebbiBrainUnity/Build/kebbi-middleware-arm64.apk（或 kebbi-arm64.apk）。
+# wrapper 內已含 rm -rf Library/Temp/Logs（避開二次 batchmode 卡死）。約 8~9 分鐘、需關 sandbox、磁碟 ≥3GB。
 ```
 
 ## 5. ⚠️ 上線前必測（對齊 進度追蹤.md「需要的資訊」）
@@ -116,7 +113,7 @@ grep -E "error CS|Exiting batchmode|Build succeeded" /tmp/kbu.log
 > 目標：用 `kebbi-middleware-arm64.apk` 驗「除馬達/DOA 外的所有功能」——TTS 出聲 / STT 收音 / LLM 回覆 / UI 流程。`useRealRobotApi=false` → 機身用 SimKebbiBody（不呼叫 NuwaRobotAPI，故一般 Android 不會崩），但語音/LLM/UDP 都是真的。
 
 **前置（金鑰要在 build 前就進 APK）**
-- 中介版 APK 的金鑰來自 build 時打包進去的 `KebbiSecrets.asset`（見第 3 節）。**若先前 build 時 `.asset` 沒填金鑰 → TTS/LLM 會無聲/失敗，要先在 Unity 填好金鑰再重 build 中介版**（第 4 節指令）。⚠️用完 rotate。
+- 金鑰用 `unity-build/build-apk.sh` 從 **env 自動注入**（不必手動建/填 `KebbiSecrets.asset`）：`export KEBBI_SPEECH_KEY=… KEBBI_SPEECH_REGION=southeastasia KEBBI_LLM_KEY=…` 後 `./unity-build/build-apk.sh middleware`。build 後 asset 自動清空、key 不落地（見 `unity-build/README.md`）。**現有 APK 是無金鑰 build → 用此流程重 build 才有聲。** ⚠️用完 rotate。
 - 確認手機已開「開發者選項 → USB 偵錯」，`adb devices` 看得到。
 
 **步驟**
