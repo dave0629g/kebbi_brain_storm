@@ -51,12 +51,14 @@ namespace KebbiBrain.Hardware
             lock (_peers) { return _peers.Contains(ip); }
         }
 
-        // 可用判斷:非空、非自己、排除明顯無效/萬用位址。
+        // 可用判斷:非空、非自己、排除明顯無效/萬用位址、且須為合法 IP 格式
+        // (畸形靜態 peer 若放行,送出時 IPAddress.Parse 會每輪丟例外/log warning → 註冊時就擋掉,fail-fast)。
         private bool IsUsable(string ip)
         {
             if (string.IsNullOrEmpty(ip)) return false;
             if (ip == _selfIp) return false;
             if (ip == "0.0.0.0" || ip == "255.255.255.255") return false;
+            if (!System.Net.IPAddress.TryParse(ip, out _)) return false; // 畸形 IP(如 300.300.300.300)→ 拒絕
             return true;
         }
     }

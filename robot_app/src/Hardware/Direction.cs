@@ -11,11 +11,16 @@ namespace KebbiBrain.Hardware
 
     public static class Direction
     {
-        // 度數正規化到 [-180,180]
+        // 度數正規化到 [-180,180]。
+        // ⚠️ deg 可能來自實機 DOA SDK 的未驗證回傳(偵測失敗常回 NaN/哨兵大數):
+        //   舊版用 while 減 360 對 NaN/Infinity/大數浮點(如 1e30,1e30-360==1e30)會「無限迴圈卡死機器人」。
+        //   改用「NaN/Infinity 守衛 + modulo」→ 不可能無限迴圈,且範圍內行為與舊版一致。
         public static float Normalize(float deg)
         {
-            while (deg > 180f) deg -= 360f;
-            while (deg < -180f) deg += 360f;
+            if (float.IsNaN(deg) || float.IsInfinity(deg)) return 0f;
+            deg %= 360f;                       // → (-360,360),消除大數迴圈不收斂
+            if (deg > 180f) deg -= 360f;
+            else if (deg < -180f) deg += 360f;
             return deg;
         }
 

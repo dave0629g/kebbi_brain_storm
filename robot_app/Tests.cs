@@ -310,6 +310,11 @@ namespace KebbiBrain
             // 無 selfIp 時不排除任何真實 IP
             var r2 = new PeerRegistry();
             Check("Peer-無 selfIp 仍可加", r2.AddStatic("10.0.0.5") && r2.Count == 1);
+
+            // 畸形 IP 格式(放行的話送出時每輪丟例外/log)→ 註冊就擋
+            Check("Peer-排除畸形 IP(300.300.300.300)", !r2.AddStatic("300.300.300.300"));
+            Check("Peer-排除非 IP 字串", !r2.AddStatic("not-an-ip"));
+            Check("Peer-畸形 IP 不增量", r2.Count == 1);
         }
 
         // 記錄式機身:給遠端命令測試斷言(SimKebbiBody 的 Move/Turn 只 log,無狀態可驗)。
@@ -606,6 +611,15 @@ namespace KebbiBrain
             Check("正規化 270°→Kiri", Direction.FromAngle(270) == Dir.Kiri);
             Check("正規化 -270°→Kanan", Direction.FromAngle(-270) == Dir.Kanan);
             Check("正規化 360°→Depan", Direction.FromAngle(360) == Dir.Depan);
+            // Normalize 防無限迴圈(實機 DOA SDK 偵測失敗可能回 NaN/哨兵大數;舊 while 版會卡死)
+            Check("Normalize NaN→0(守衛)", Direction.Normalize(float.NaN) == 0f);
+            Check("Normalize +Infinity→0", Direction.Normalize(float.PositiveInfinity) == 0f);
+            Check("Normalize -Infinity→0", Direction.Normalize(float.NegativeInfinity) == 0f);
+            Check("Normalize 大數 1e30 不卡死且落 [-180,180]",
+                Direction.Normalize(1e30f) >= -180f && Direction.Normalize(1e30f) <= 180f);
+            Check("Normalize 270→-90(modulo 正確)", Math.Abs(Direction.Normalize(270f) - (-90f)) < 0.01f);
+            Check("Normalize -270→90", Math.Abs(Direction.Normalize(-270f) - 90f) < 0.01f);
+            Check("Normalize 540→180(邊界保留)", Math.Abs(Direction.Normalize(540f) - 180f) < 0.01f);
             // 8 向印尼語詞往返(複合詞 serong/belakang + kanan/kiri 不可被單詞吃掉)
             foreach (Dir d in new[] { Dir.Depan, Dir.SerongKanan, Dir.Kanan, Dir.BelakangKanan,
                                       Dir.Belakang, Dir.BelakangKiri, Dir.Kiri, Dir.SerongKiri })
@@ -692,6 +706,17 @@ namespace KebbiBrain
             Check("命令-Stop 套用", BodyCommand.TryApply(BodyCommand.Stop(), spy) && spy.Stopped);
             Check("命令-SM 欄位不足→false(不丟例外)", !BodyCommand.TryApply("BC|SM|2", spy));
             Check("命令-空字串→false", !BodyCommand.TryApply("", spy));
+            // 畸形網路封包:一律拒絕(回 false)而非丟例外崩掉被控機接收迴圈
+            Check("命令-SM 非數字馬達ID→false(不丟例外)", !BodyCommand.TryApply("BC|SM|abc|10|50", spy));
+            Check("命令-SM 馬達ID 超出範圍→false", !BodyCommand.TryApply("BC|SM|999|10|50", spy));
+            Check("命令-SM 非數字角度→false", !BodyCommand.TryApply("BC|SM|2|x|50", spy));
+            Check("命令-SM 非數字速度→false", !BodyCommand.TryApply("BC|SM|2|10|y", spy));
+            Check("命令-MV 非數字→false", !BodyCommand.TryApply("BC|MV|fast", spy));
+            Check("命令-TN 非數字→false", !BodyCommand.TryApply("BC|TN|left", spy));
+            // 畸形命令不應殘留副作用:再送一個正常命令仍正確
+            Check("命令-畸形後正常命令仍可套用",
+                BodyCommand.TryApply(BodyCommand.SetMotor(KebbiMotor.RShoulderY, 70f, 50f), spy)
+                && Math.Abs(spy.Motors[KebbiMotor.RShoulderY] - 70f) < 0.01f);
         }
 
         private static void T_G2_GeometryRelay()

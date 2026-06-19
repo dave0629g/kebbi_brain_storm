@@ -20,20 +20,28 @@ namespace KebbiBrain.Hardware
         public static string Stop() => Prefix + D + "ST";
 
         // 若 msg 是機身命令 → 套到 body 並回 true;否則回 false(讓呼叫端把它當一般訊息轉交)。
+        // ⚠️ msg 來自網路(可能損壞):一律用 TryParse + 馬達 ID 邊界檢查,畸形封包「拒絕(回 false)」
+        //    而非丟例外崩掉被控機的接收迴圈。
         public static bool TryApply(string msg, IKebbiBody body)
         {
             if (body == null || string.IsNullOrEmpty(msg)) return false;
             var p = msg.Split(D);
             if (p.Length < 2 || p[0] != Prefix) return false;
             string op = p[1];
-            if (op == "SM" && p.Length >= 5) { body.SetMotor((KebbiMotor)int.Parse(p[2], Inv), P(p[3]), P(p[4])); return true; }
-            if (op == "MV" && p.Length >= 3) { body.Move(P(p[2])); return true; }
-            if (op == "TN" && p.Length >= 3) { body.Turn(P(p[2])); return true; }
+            if (op == "SM" && p.Length >= 5)
+            {
+                if (!int.TryParse(p[2], NumberStyles.Integer, Inv, out int mid)) return false;
+                if (!System.Enum.IsDefined(typeof(KebbiMotor), mid)) return false; // 未知馬達 ID → 拒絕
+                if (!TryP(p[3], out float deg) || !TryP(p[4], out float speed)) return false;
+                body.SetMotor((KebbiMotor)mid, deg, speed); return true;
+            }
+            if (op == "MV" && p.Length >= 3) { if (!TryP(p[2], out float v)) return false; body.Move(v); return true; }
+            if (op == "TN" && p.Length >= 3) { if (!TryP(p[2], out float v)) return false; body.Turn(v); return true; }
             if (op == "ST") { body.StopWheels(); return true; }
             return false;
         }
 
         private static string F(float v) => v.ToString("0.###", Inv);
-        private static float P(string s) => float.Parse(s, NumberStyles.Float, Inv);
+        private static bool TryP(string s, out float v) => float.TryParse(s, NumberStyles.Float, Inv, out v);
     }
 }
