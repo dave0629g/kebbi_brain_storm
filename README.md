@@ -1,5 +1,7 @@
 # Kebbi 凱比機器人競賽 — Brainstorm 與 robot_app 開發骨架
 
+[![tests](https://github.com/dave0629g/kebbi_brain_storm/actions/workflows/test.yml/badge.svg)](https://github.com/dave0629g/kebbi_brain_storm/actions/workflows/test.yml)
+
 「STEM 人文跨域與 AI 應用競賽 — Kebbi 凱比機器人創新教案與應用競賽」的選題發想與程式開發。
 輔導 13 名學生分 5 組(G1 小五升六、G2 國二升國三、G3 國三升高一、G4 高一升高二・印尼語、G5 高三升大學),
 每組各自獨立、並有「多機協作」彩蛋。核心設計原則:**每個專案都要「只有平板做不到」**——靠 Kebbi 的

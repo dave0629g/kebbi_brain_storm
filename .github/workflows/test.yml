@@ -1,0 +1,19 @@
+name: tests
+
+# 每次 push / PR 自動跑 robot_app 的純 Sim 自測(352 項,免金鑰)。
+# --test 的 process exit code = Tests.RunAll():0=全過、1=有失敗 → CI 紅/綠。
+on:
+  push:
+    branches: [ main, auto/dev-loop ]
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: robot_app 自測 (--test)
+        run: dotnet run --project robot_app/KebbiBrain.Sim.csproj -- --test
