@@ -1212,11 +1212,13 @@ namespace KebbiBrain
             Check("G5審判-插話改票:成功處理 1 次插話(Interjections==1)", g.Interjections == 1);
             Check("G5審判-插話改票:仍宣判辯方勝(控2:辯6)", g.Verdict == "辯方勝");
 
-            // (3) 轉向學生:插話 ProSide=false、DoaDeg=120 → 辯方機 NeckZ 被夾限到 90(正後盲區)。
-            float expected = KebbiHead.TurnToward(new SimKebbiBody(noop, false), 120f, out bool reach120);
-            Check("G5審判-轉向學生:辯方機 NeckZ 夾限到 120 的 clamped 值",
-                System.Math.Abs(def1.GetMotor(KebbiMotor.NeckZ) - expected) < 0.01f);
-            Check("G5審判-轉向學生:120 度落在頭轉不到區(夾限)", !reach120);
+            // (3) 轉向學生:插話 ProSide=false、DoaDeg=120 → 辯方機(輪式 canMove)用 FaceFully:
+            //     底盤轉 80° + 頭 NeckZ 40°(±40 上限) → 完整面向;NeckZ 停在頭部分量 40°。
+            var ff120 = KebbiHead.FaceFully(new SimKebbiBody(noop, true), 120f);
+            Check("G5審判-轉向學生:輪式 FaceFully(120°) 底盤80+頭40、完整面向",
+                ff120.FullyFaced && System.Math.Abs(ff120.BaseTurnDeg - 80f) < 0.01f && System.Math.Abs(ff120.HeadDeg - 40f) < 0.01f);
+            Check("G5審判-轉向學生:辯方機 NeckZ 停在頭部分量(=40)",
+                System.Math.Abs(def1.GetMotor(KebbiMotor.NeckZ) - ff120.HeadDeg) < 0.01f);
 
             // (4) 開場/結辯順序:自訂 Opening+Closing,用 RecordingVoice 驗開場白先說、結辯詞在宣判前說。
             var g2 = NewTrial(out _, out _, out var proV2, out _);

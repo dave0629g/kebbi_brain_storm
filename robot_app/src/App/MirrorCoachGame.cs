@@ -206,7 +206,7 @@ namespace KebbiBrain.App
             if (r.FullyFaced && r.BaseTurnDeg != 0f)
                 _ctx.Log("   ↪️ 底盤轉 " + r.BaseTurnDeg.ToString("0") + "° + 頭 " + r.HeadDeg.ToString("0") + "° 面向發問者");
             else if (!r.FullyFaced)
-                _ctx.Log("   ⚠ 發問者在 " + doaDeg.ToString("0.0") + "°，無底盤、頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
+                _ctx.Log("   ⚠ 發問者在 " + doaDeg.ToString("0.0") + "°，" + (_ctx.Body.CanMove ? "" : "無底盤、") + "頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
             await _ctx.Voice.SpeakAsync("好，我們放慢一點。", "zh-TW");
             _ctx.Log("   🐢 BPM 降到 " + Bpm);
             return r.FullyFaced;

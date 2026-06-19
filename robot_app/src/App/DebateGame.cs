@@ -228,7 +228,7 @@ namespace KebbiBrain.App
             if (r.FullyFaced && r.BaseTurnDeg != 0f)
                 _log("   ↪️ 底盤轉 " + r.BaseTurnDeg.ToString("0") + "° + 頭 " + r.HeadDeg.ToString("0") + "° → 完整面向學生");
             else if (!r.FullyFaced)
-                _log("   ⚠ 學生在 " + doaDeg.ToString("0.0") + "°，無底盤、頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
+                _log("   ⚠ 學生在 " + doaDeg.ToString("0.0") + "°，" + (body.CanMove ? "" : "無底盤、") + "頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
             await voice.SpeakAsync("請這位同學出示證據。", "zh-TW");
             return r.FullyFaced;
         }
