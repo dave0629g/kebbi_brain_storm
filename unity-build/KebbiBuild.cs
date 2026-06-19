@@ -48,6 +48,10 @@ public static class KebbiBuild
         kab.useRealRobotApi = useRealRobotApi; // false → 一般 Android 當模擬器測 middleware(body=SimKebbiBody)
         kab.mode = mode;                       // LinkPingTest=驗 UDP 廣播;預設 G4_TebakArah
         kab.peerIp = System.Environment.GetEnvironmentVariable("KEBBI_PEER_IP") ?? ""; // 對方 IP:WiFi 丟廣播時靠 unicast 直連(非機密,可空)
+        var rid = System.Environment.GetEnvironmentVariable("KEBBI_ROBOT_ID");        // 每台設不同 ID(多機;同 ID 會把對方當自己回音丟棄),可空=預設 Kebbi-A
+        if (!string.IsNullOrEmpty(rid)) kab.robotId = rid;
+        var prid = System.Environment.GetEnvironmentVariable("KEBBI_PEER_ROBOT_ID");  // Director 要驅動的被控機 ID,可空=預設 Kebbi-B
+        if (!string.IsNullOrEmpty(prid)) kab.peerRobotId = prid;
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
         EditorSceneManager.SaveScene(scene, scenePath);
 
