@@ -39,6 +39,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--g4t") >= 0) { await PlayG4TournamentDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--g4e") >= 0) { await PlayG4EightWayDemoAsync(); return 0; }
+
             if (Array.IndexOf(args, "--g3r") >= 0) { await PlayG3RewindDemoAsync(); return 0; }
 
             if (Array.IndexOf(args, "--g3f") >= 0) { await PlayG3FrameDemoAsync(); return 0; }
@@ -76,6 +78,7 @@ namespace KebbiBrain
             Console.WriteLine("  --finale          示範:合體彩蛋多機接力大舞台(含離線站降級跳過)");
             Console.WriteLine("  --g5t             G5 七步審判驅動器 + 學生席舉手插話分支");
             Console.WriteLine("  --g4t             G4 裁判賽多輪排名（視角轉換 + 聲源核對）");
+            Console.WriteLine("  --g4e             G4 八向方位（含斜向 serong）+ NeckZ 可達性決定實際面向扇區");
             Console.WriteLine("  --g3r             G3 鏡像教練:逐幀回退(喊「再一次」回退一幀重示範,手冊 step4)");
             Console.WriteLine("  --g3f             G3 動作幀資料化:單幀自訂停留 HoldMs + 整組循環 Move.Loops");
             Console.WriteLine("  --g2v             G2 學生自編腳本驗證(結構把關:缺步/層次錯置→才放行接力)");
@@ -634,6 +637,44 @@ namespace KebbiBrain
             game.PrintRanking();
 
             log("\n=== 重點：聲源 DOA 當真值核對方位詞、轉頭具身回饋、視角轉換糾錯、多輪累積排名（平手以校準序 stable）===");
+            log("====================================================");
+        }
+
+        // G4《Tebak Arah》八向方位 Demo（純 Sim）——示範:① 4 向擴 8 向(含斜向 serong=印尼語「斜」)、
+        // ② 複合詞解析(belakang kiri 不被單詞吃掉)、③ NeckZ 物理可達性決定判決:正後方頭轉不過去 → 回報「最近可達扇區」。
+        private static async Task PlayG4EightWayDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var body = new SimKebbiBody(log, canMove: false);
+            var voice = new SimVoice(log);
+            var ctx = new KebbiContext(body, voice, new SimLlm(log), log);
+            var game = new TebakArahGame(ctx);
+
+            log("========== G4《Tebak Arah》八向方位(含斜向 serong)Demo ==========");
+            log("（▶ 校準階段：六位學生分坐 8 向中的 6 個方位）");
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Andi", 0);     // depan 前
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Budi", 45);    // serong kanan 右前
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Citra", 90);   // kanan 右
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Dewi", 135);   // belakang kanan 右後
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Eka", -90);    // kiri 左
+            await CalibrateAsync(game, body, voice.EnqueueHeard, "Fitri", -135); // belakang kiri 左後
+
+            log("\n（▶ 斜向方位題：問『誰在我的右前(serong kanan)?』→ Budi 答 'saya di serong kanan'）");
+            body.CurrentDoa = 45; voice.EnqueueHeard("saya di serong kanan");
+            var r1 = await game.ForwardRoundAsync(Dir.SerongKanan);
+            log("→ " + (r1.LanguageCorrect && r1.RightResponder ? "答對 ✔（斜向方位詞正確）" : "未全對 ✘"));
+
+            log("\n（▶ 複合詞辨識：左後 belakang kiri 不會被 belakang 或 kiri 單詞吃掉）");
+            body.CurrentDoa = -135; voice.EnqueueHeard("saya di belakang kiri");
+            var r2 = await game.ForwardRoundAsync(Dir.BelakangKiri);
+            log("→ " + (r2.LanguageCorrect ? "解析正確 ✔ = belakang kiri（左後）" : "解析錯 ✘"));
+
+            log("\n（▶ 馬達可達性決定判決：問正後方(180°)，頭 NeckZ 只能 ±90 → 回報最近可達扇區）");
+            float faced = KebbiHead.TurnToward(body, 180f, out bool reachable, out Dir reached);
+            log("   🤖 聲源在正後方 180°，頭轉到 " + faced.ToString("0") + "°（"
+                + (reachable ? "可達" : "不可達") + "）→ 實際面向最近可達扇區：" + Direction.ToZh(reached) + " / " + Direction.ToIndo(reached));
+
+            log("\n=== 重點：方位從 4 向細到 8 向(serong 斜向)、印尼語複合詞解析、NeckZ 物理可達性決定『實際面向扇區』(正後方降級到右) ===");
             log("====================================================");
         }
 

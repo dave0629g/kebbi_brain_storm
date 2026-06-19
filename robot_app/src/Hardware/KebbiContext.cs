@@ -35,5 +35,15 @@ namespace KebbiBrain.Hardware
             body.SetMotor(KebbiMotor.NeckZ, clamped);
             return clamped;
         }
+
+        // 多載：除了回傳角度/可達旗標,再回報「夾限後實體頭真正面向的扇區」。
+        // 8 向細粒度下,斜向/正後方常不可達 → reachedSector 是頭能轉到的最接近扇區(非原扇區),體現馬達可達性決定判決。
+        // 向後相容:既有 3 參數多載不動,本多載內部呼叫它(同樣 SetMotor + 夾限)。
+        public static float TurnToward(IKebbiBody body, float doaDeg, out bool reachable, out Dir reachedSector)
+        {
+            float clamped = TurnToward(body, doaDeg, out reachable);
+            reachedSector = Direction.FromAngle(clamped);
+            return clamped;
+        }
     }
 }

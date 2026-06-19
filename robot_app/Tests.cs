@@ -50,6 +50,7 @@ namespace KebbiBrain
             T_Finale();
             T_G5_Trial();
             T_G4_Judge();
+            T_G4_EightWay();
             T_G3_Rewind();
             T_G3_Frame();
             T_G2_Validator();
@@ -80,8 +81,8 @@ namespace KebbiBrain
             Check("90°→Kanan", Direction.FromAngle(90) == Dir.Kanan);
             Check("-90°→Kiri", Direction.FromAngle(-90) == Dir.Kiri);
             Check("170°→Belakang", Direction.FromAngle(170) == Dir.Belakang);
-            Check("45°→Depan(邊界)", Direction.FromAngle(45) == Dir.Depan);
-            Check("46°→Kanan(邊界)", Direction.FromAngle(46) == Dir.Kanan);
+            Check("22.5°→Depan(邊界含上界)", Direction.FromAngle(22.5f) == Dir.Depan);
+            Check("45°→SerongKanan(右前,45°中心 8向)", Direction.FromAngle(45) == Dir.SerongKanan);
         }
 
         private static void T_ParseIndo()
@@ -561,17 +562,23 @@ namespace KebbiBrain
         // 方位扇區邊界 + 角度正規化 + 印尼語詞往返(把 G4 的方位判定逼到邊角)。
         private static void T_Direction_Edges()
         {
-            Check("135°→Kanan(邊界含)", Direction.FromAngle(135) == Dir.Kanan);
-            Check("136°→Belakang", Direction.FromAngle(136) == Dir.Belakang);
-            Check("-135°→Belakang(邊界)", Direction.FromAngle(-135) == Dir.Belakang);
-            Check("-134°→Kiri", Direction.FromAngle(-134) == Dir.Kiri);
+            // 8 向 45° 扇區邊界(含上界慣例 (下界,上界])
+            Check("135°→BelakangKanan(右後,8向)", Direction.FromAngle(135) == Dir.BelakangKanan);
+            Check("157.5°→BelakangKanan(邊界含上界)", Direction.FromAngle(157.5f) == Dir.BelakangKanan);
+            Check("158°→Belakang", Direction.FromAngle(158) == Dir.Belakang);
+            Check("-135°→BelakangKiri(左後,8向)", Direction.FromAngle(-135) == Dir.BelakangKiri);
+            Check("-158°→Belakang", Direction.FromAngle(-158) == Dir.Belakang);
             Check("180°→Belakang", Direction.FromAngle(180) == Dir.Belakang);
             Check("-180°→Belakang", Direction.FromAngle(-180) == Dir.Belakang);
-            Check("-45°→Kiri(邊界)", Direction.FromAngle(-45) == Dir.Kiri);
+            Check("-45°→SerongKiri(左前,8向)", Direction.FromAngle(-45) == Dir.SerongKiri);
+            Check("-22.5°→SerongKiri(邊界含上界)", Direction.FromAngle(-22.5f) == Dir.SerongKiri);
+            Check("-22.4°→Depan(過邊界回正前)", Direction.FromAngle(-22.4f) == Dir.Depan);
             Check("正規化 270°→Kiri", Direction.FromAngle(270) == Dir.Kiri);
             Check("正規化 -270°→Kanan", Direction.FromAngle(-270) == Dir.Kanan);
             Check("正規化 360°→Depan", Direction.FromAngle(360) == Dir.Depan);
-            foreach (Dir d in new[] { Dir.Depan, Dir.Kanan, Dir.Belakang, Dir.Kiri })
+            // 8 向印尼語詞往返(複合詞 serong/belakang + kanan/kiri 不可被單詞吃掉)
+            foreach (Dir d in new[] { Dir.Depan, Dir.SerongKanan, Dir.Kanan, Dir.BelakangKanan,
+                                      Dir.Belakang, Dir.BelakangKiri, Dir.Kiri, Dir.SerongKiri })
                 Check("印尼語詞往返還原 " + d, Direction.ParseIndo(Direction.ToIndo(d)) == d);
         }
 
@@ -1401,6 +1408,53 @@ namespace KebbiBrain
                     new TebakArahGame.MatchSpec("P", "Q") }).GetAwaiter().GetResult();
                 Check("G4向後相容-Tournament 後舊 Score 仍 0", g.Score == 0 && g.Rounds == 0);
             }
+        }
+
+        // G4 八向方位系統:FromAngle 8 扇區(含斜向 serong)、印尼語複合詞解析、最近可達扇區降級、
+        // TurnToward 多載回報「夾限後實際面向扇區」、E2E 斜向題。核心:45° 細粒度下斜向常不可達 → 馬達可達性決定判決。
+        private static void T_G4_EightWay()
+        {
+            Action<string> noop = _ => { };
+
+            // (1) 斜向扇區判決(中心對齊 ±45/±135)
+            Check("8向-45°→SerongKanan(右前)", Direction.FromAngle(45) == Dir.SerongKanan);
+            Check("8向-135°→BelakangKanan(右後)", Direction.FromAngle(135) == Dir.BelakangKanan);
+            Check("8向--135°→BelakangKiri(左後)", Direction.FromAngle(-135) == Dir.BelakangKiri);
+            Check("8向--45°→SerongKiri(左前)", Direction.FromAngle(-45) == Dir.SerongKiri);
+
+            // (2) 複合詞解析:不可被單詞 substring 吃掉;單詞仍可
+            Check("8向-解析 'serong kanan'(不被 kanan 吃)", Direction.ParseIndo("Saya di serong kanan") == Dir.SerongKanan);
+            Check("8向-解析 'belakang kiri'(不被 belakang/kiri 吃)", Direction.ParseIndo("di belakang kiri") == Dir.BelakangKiri);
+            Check("8向-解析單詞 'kanan' 仍可", Direction.ParseIndo("di kanan") == Dir.Kanan);
+            Check("8向-解析單詞 'belakang' 仍可", Direction.ParseIndo("di belakang") == Dir.Belakang);
+            Check("8向-解析 'xyz'→null", Direction.ParseIndo("xyz") == null);
+
+            // (3) 最近可達扇區降級(NeckZ ±90):斜向 45° 可達不降級;右後/正後夾限到右
+            Check("8向-NearestReachable SerongKanan(45°)可達不降級", Direction.NearestReachable(Dir.SerongKanan, -90f, 90f) == Dir.SerongKanan);
+            Check("8向-NearestReachable BelakangKanan(135°)→Kanan", Direction.NearestReachable(Dir.BelakangKanan, -90f, 90f) == Dir.Kanan);
+            Check("8向-NearestReachable BelakangKiri(-135°)→Kiri", Direction.NearestReachable(Dir.BelakangKiri, -90f, 90f) == Dir.Kiri);
+            Check("8向-NearestReachable Belakang(180°)→Kanan(夾到+90)", Direction.NearestReachable(Dir.Belakang, -90f, 90f) == Dir.Kanan);
+
+            // (4) TurnToward 多載回報「夾限後實際面向扇區」;舊 3 參數多載行為不變(回歸)
+            var body = new SimKebbiBody(noop, canMove: false);  // NeckZ ±90
+            float f1 = KebbiHead.TurnToward(body, 45f, out bool reach1, out Dir sec1);
+            Check("8向-TurnToward(45°):可達、扇區=SerongKanan、NeckZ=45",
+                reach1 && sec1 == Dir.SerongKanan && Math.Abs(f1 - 45f) < 0.01f);
+            float f2 = KebbiHead.TurnToward(body, 170f, out bool reach2, out Dir sec2);
+            Check("8向-TurnToward(170°正後):不可達、夾到+90、實際扇區=Kanan",
+                !reach2 && sec2 == Dir.Kanan && Math.Abs(f2 - 90f) < 0.01f);
+            float f3 = KebbiHead.TurnToward(body, 170f, out bool reach3);
+            Check("8向-舊 3 參數多載仍夾到+90、不可達(向後相容)", !reach3 && Math.Abs(f3 - 90f) < 0.01f);
+
+            // (5) E2E 斜向題:校準 doa=45 的學生→Dir=SerongKanan;正向題用 'serong kanan' 答對得分
+            var ctx = SilentSim(out var b, out var v);
+            var game = new TebakArahGame(ctx);
+            b.CurrentDoa = 45f; v.EnqueueHeard("Saya di sini!");
+            game.CalibrateOneAsync("Sari").GetAwaiter().GetResult();
+            Check("8向-E2E 校準 45°→SerongKanan", game.FindByName("Sari").Dir == Dir.SerongKanan);
+            b.CurrentDoa = 45f; v.EnqueueHeard("saya di serong kanan");
+            var rr = game.ForwardRoundAsync(Dir.SerongKanan).GetAwaiter().GetResult();
+            Check("8向-E2E 正向斜向題:方位詞對+回答者對+得分", rr.LanguageCorrect && rr.RightResponder && game.Score == 1);
         }
 
         // 可逐場腳本化 DOA 的記錄式身體：給 G4 tournament 多場各自真值（ReadDoaDegrees 依序回傳預排角度）。
