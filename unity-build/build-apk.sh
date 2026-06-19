@@ -22,6 +22,7 @@ case "${1:-middleware}" in
   linkping)   METHOD="KebbiBuild.BuildLinkPingApk" ;;   # 雙機 UDP 廣播驗證(必測④ 送出端)
   g1director) METHOD="KebbiBuild.BuildG1DirectorApk" ;; # G1 分散式中控(發 BodyCommand BC| 給遠端機)
   controlled) METHOD="KebbiBuild.BuildControlledApk" ;; # 被控機(收 BC| 套到本機 body 執行)
+  g5director) METHOD="KebbiBuild.BuildG5DirectorApk" ;; # G5 分散式中控(辯方機身+語音 BC|/VC| 給遠端)
   verify)     METHOD="KebbiBuild.VerifySecretsRoundTrip" ;;
   *) echo "用法: $0 [middleware|real|linkping|verify]"; exit 2 ;;
 esac
