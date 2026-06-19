@@ -195,12 +195,15 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // 兩台擺近、麥克風對喇叭;其中一台 converseStarter=true 先開口。
     private async Task RunConverseSttAsync()
     {
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
+        _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
         var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = personaLang };
-        var game = new ConversationSttGame(ctx.Voice, ctx.Llm, me,
-                                           string.IsNullOrEmpty(peerName) ? "對方" : peerName, Debug.Log);
-        Debug.Log("[ConverseStt] " + personaName + " 用麥克風聽對方+STT 對話," +
-                  (converseStarter ? "我先說" : "先聽") + "(兩台請擺近)");
+        // 內容走空氣(ctx.Voice 的 STT 聽對方),floor 走網路(realLink 的 token)。
+        var game = new ConversationSttGame(ctx.Voice, ctx.Llm, realLink, me, peerRobotId,
+                                           string.IsNullOrEmpty(peerName) ? peerRobotId : peerName, Debug.Log);
+        Debug.Log("[ConverseStt] " + personaName + " STT 聽對方+floor token 交棒," +
+                  (converseStarter ? "我先持 floor" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
         await game.RunAsync(converseStarter, maxTurns: 0);
     }
 

@@ -300,25 +300,28 @@ namespace KebbiBrain
 
         private static void T_ConversationStt()
         {
+            // floor-token 版:內容走空氣(STT 聽=RecordingVoice 的 EnqueueHeard),floor 走網路 token。
             Action<string> noop = _ => { };
-            var me = new App.ConversationGame.Persona { Name = "Andi", Character = "periang.", Lang = "id-ID" };
+            var bus = new SimRobotBus(noop);
+            var la = bus.CreateLink("A");
+            var lb = bus.CreateLink("B");
+            var va = new RecordingVoice { ListenDelayMs = 8 };  // Andi 聽 Budi
+            var vb = new RecordingVoice { ListenDelayMs = 8 };  // Budi 聽 Andi
+            for (int i = 0; i < 6; i++) { va.EnqueueHeard("dari Budi " + i); vb.EnqueueHeard("dari Andi " + i); }
+            var pa = new App.ConversationGame.Persona { Name = "Andi", Character = "periang.", Lang = "id-ID" };
+            var pb = new App.ConversationGame.Persona { Name = "Budi", Character = "tenang.", Lang = "id-ID" };
+            var ga = new App.ConversationSttGame(va, new SimLlm(noop), la, pa, "B", "Budi") { HandshakeIntervalMs = 20, MaxListenWindowsWaitingFloor = 80 };
+            var gb = new App.ConversationSttGame(vb, new SimLlm(noop), lb, pb, "A", "Andi") { HandshakeIntervalMs = 20, MaxListenWindowsWaitingFloor = 80 };
 
-            // (1) 聽得到對方 → 一來一往交替
-            var v = new RecordingVoice();
-            v.EnqueueHeard("Halo Andi, apa kabar?"); // STT「聽到」對方一句
-            var g = new App.ConversationSttGame(v, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0 };
-            bool done = System.Threading.Tasks.Task.Run(() => g.RunAsync(starter: true, maxTurns: 2)).Wait(5000);
-            Check("STT對話-完成不卡死", done);
-            Check("STT對話-講了 2 句(印尼語)", g.MyTurns == 2 && v.Spoken.Count == 2 && v.LastLang == "id-ID");
-            Check("STT對話-歷史含聽到的對方台詞", string.Join("|", g.History).Contains("Budi: Halo Andi"));
+            var ta = ga.RunAsync(starter: true, maxTurns: 2);
+            var tb = gb.RunAsync(starter: false, maxTurns: 2);
+            bool done = System.Threading.Tasks.Task.WhenAll(ta, tb).Wait(12000);
 
-            // (2) 聽不到對方(STT 全空)→ 主動打破沉默(自我修正,不卡死)
-            var v2 = new RecordingVoice(); // 沒 EnqueueHeard → ListenAsync 一律回 ""
-            var g2 = new App.ConversationSttGame(v2, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0, MinListenRetries = 3, MaxListenRetries = 3 };
-            bool done2 = System.Threading.Tasks.Task.Run(() => g2.RunAsync(starter: false, maxTurns: 1)).Wait(5000);
-            Check("STT對話-聽不到也不卡死", done2);
-            Check("STT對話-沒聽到→主動開口打破沉默", g2.MyTurns >= 1 && v2.Spoken.Count >= 1);
-            Check("STT對話-記錄沒聽到次數", g2.MissedListens == 3);
+            Check("STT對話-floor token 雙方完成不卡死", done);
+            Check("STT對話-A 講 2 句(印尼語 TTS)", ga.MyTurns == 2 && va.LastLang == "id-ID");
+            Check("STT對話-B 講 2 句", gb.MyTurns == 2);
+            Check("STT對話-B 用 STT 聽到並記錄對方(Andi)", string.Join("|", gb.History).Contains("Andi: dari Andi"));
+            Check("STT對話-A 用 STT 聽到並記錄對方(Budi)", string.Join("|", ga.History).Contains("Budi: dari Budi"));
         }
 
         private static void T_Conversation()
@@ -415,8 +418,14 @@ namespace KebbiBrain
             }
             private async Task DelayedSpeakAsync(string text, string lang)
             { await Task.Delay(SpeakDelayMs); Spoken.Add((text, lang)); }
+            public int ListenDelayMs = 0; // >0 → 模擬聽音耗時(讓並行測試 yield)
             public Task<string> ListenAsync(string lang = "id-ID")
-            { return Task.FromResult(_heard.Count > 0 ? _heard.Dequeue() : ""); }
+            {
+                string r = _heard.Count > 0 ? _heard.Dequeue() : "";
+                if (ListenDelayMs <= 0) return Task.FromResult(r);
+                return DelayedListen(r);
+            }
+            private async Task<string> DelayedListen(string r) { await Task.Delay(ListenDelayMs); return r; }
         }
 
         // 遠端機身控制:中控用 RemoteBodyProxy 經 link 驅動被控機(BodyCommandReceiver 套用到本機 body)。
