@@ -27,6 +27,7 @@ namespace KebbiBrain
             T_RobotLink();
             T_RobotLinkProtocol();
             T_PeerRegistry();
+            T_Conversation();
             T_RemoteBody();
             T_RemoteVoice();
             T_RemoteVoiceDone();
@@ -282,6 +283,31 @@ namespace KebbiBrain
             Check("協定-廣播→收", RobotLinkProtocol.ShouldDeliver("A", RobotLinkProtocol.All, "B"));
             Check("協定-非給我→丟", !RobotLinkProtocol.ShouldDeliver("A", "C", "B"));
             Check("協定-自己廣播回來→丟", !RobotLinkProtocol.ShouldDeliver("B", RobotLinkProtocol.All, "B"));
+        }
+
+        private static void T_Conversation()
+        {
+            Action<string> noop = _ => { };
+            var bus = new SimRobotBus(noop);
+            var la = bus.CreateLink("A");
+            var lb = bus.CreateLink("B");
+            var va = new RecordingVoice();
+            var vb = new RecordingVoice();
+            var pa = new App.ConversationGame.Persona { Name = "Andi", Character = "periang dan ramah.", Lang = "id-ID" };
+            var pb = new App.ConversationGame.Persona { Name = "Budi", Character = "tenang dan bijak.", Lang = "id-ID" };
+            var ga = new App.ConversationGame(va, new SimLlm(noop), la, pa, "B", "Budi") { HandshakeIntervalMs = 30 };
+            var gb = new App.ConversationGame(vb, new SimLlm(noop), lb, pb, "A", "Andi") { HandshakeIntervalMs = 30 };
+
+            var ta = ga.RunAsync(starter: true, maxTurns: 2, waitMs: 3000);
+            var tb = gb.RunAsync(starter: false, maxTurns: 2, waitMs: 3000);
+            bool done = System.Threading.Tasks.Task.WhenAll(ta, tb).Wait(8000); // 含握手,8s 逾時保護
+
+            Check("對話-雙方完成不卡死(握手+2來回)", done);
+            Check("對話-A 講 2 句", ga.MyTurns == 2);
+            Check("對話-B 講 2 句", gb.MyTurns == 2);
+            Check("對話-A 用印尼語 TTS 說了 2 句", va.Spoken.Count == 2 && va.LastLang == "id-ID");
+            Check("對話-B 收到並記錄對方(Andi)台詞", string.Join("|", gb.History).Contains("Andi:"));
+            Check("對話-A 歷史交替含對方(Budi)", string.Join("|", ga.History).Contains("Budi:"));
         }
 
         private static void T_PeerRegistry()
