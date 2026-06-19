@@ -27,5 +27,20 @@ namespace KebbiBrain
         public static string OpenAiModel = "gpt-4o-mini";              // OpenAI 用(可改 gpt-4o)
 
         private static string Env(string k) => Environment.GetEnvironmentVariable(k) ?? "";
+
+        // 依語言挑 Azure 語音。原本只有單一 SpeechVoice(印尼語),但 G1/G2/G3/G5 講中文(zh-TW)、只有 G4 講印尼語(id-ID)
+        //  → 單一語音會讓中文台詞用印尼語聲線合成而被 Azure 拒(語音/語言不符)。改為依 lang 自動選聲線:
+        //   configuredVoice 與該語言相符就用它;否則中文用 zh-TW 預設、印尼語用 id-ID 預設。
+        public static string VoiceForLang(string lang, string configuredVoice = null)
+        {
+            string v = string.IsNullOrEmpty(configuredVoice) ? SpeechVoice : configuredVoice;
+            if (!string.IsNullOrEmpty(v) && !string.IsNullOrEmpty(lang) && v.StartsWith(lang, StringComparison.OrdinalIgnoreCase))
+                return v;                                              // 配置聲線就是這語言 → 用它
+            if (!string.IsNullOrEmpty(lang) && lang.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+                return "zh-TW-HsiaoChenNeural";                        // 台灣中文女聲(男聲 zh-TW-YunJheNeural)
+            if (!string.IsNullOrEmpty(lang) && lang.StartsWith("id", StringComparison.OrdinalIgnoreCase))
+                return "id-ID-GadisNeural";                            // 印尼語女聲
+            return string.IsNullOrEmpty(v) ? "id-ID-GadisNeural" : v;  // fallback
+        }
     }
 }

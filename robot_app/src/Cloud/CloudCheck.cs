@@ -38,6 +38,16 @@ namespace KebbiBrain.Cloud
             }
             catch (Exception e) { fail++; log("  ❌ TTS 失敗：" + e.Message); }
 
+            // 1b) 中文 TTS：G1/G2/G3/G5 講中文(zh-TW),驗 VoiceForLang 自動選中文聲線(否則用印尼聲線合成中文會被 Azure 拒)
+            try
+            {
+                string zhVoice = Config.VoiceForLang("zh-TW", Config.SpeechVoice);
+                byte[] wav = await speech.SynthesizeWavAsync("法官大人，我方主張地球繞著太陽運行。", "zh-TW", zhVoice);
+                File.WriteAllBytes(Path.Combine(outDir, "check_zh.wav"), wav);
+                log("  ✅ 中文 TTS 成功（" + wav.Length + " bytes，聲線 " + zhVoice + "）→ G1/G2/G3/G5 中文台詞可出聲");
+            }
+            catch (Exception e) { fail++; log("  ❌ 中文 TTS 失敗：" + e.Message); }
+
             // 2) TTS→STT 來回：合成「Saya di kanan」再辨識，應含 "kanan"
             try
             {

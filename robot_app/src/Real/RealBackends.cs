@@ -124,8 +124,9 @@ namespace KebbiBrain.Real
         public async Task SpeakAsync(string text, string lang = "id-ID")
         {
             string url = "https://" + _region + ".tts.speech.microsoft.com/cognitiveservices/v1";
+            string voice = KebbiBrain.Config.VoiceForLang(lang, _voice);   // 依語言挑聲線(中文用中文聲、印尼語用印尼聲)
             string ssml = "<speak version='1.0' xml:lang='" + lang + "'><voice xml:lang='" + lang +
-                          "' name='" + _voice + "'>" + XmlEscape(text) + "</voice></speak>";
+                          "' name='" + voice + "'>" + XmlEscape(text) + "</voice></speak>";
             using (var req = new UnityWebRequest(url, "POST"))
             {
                 req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(ssml));

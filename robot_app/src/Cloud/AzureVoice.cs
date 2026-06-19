@@ -29,10 +29,11 @@ namespace KebbiBrain.Cloud
 
         public async Task SpeakAsync(string text, string lang = "id-ID")
         {
-            byte[] wav = await _speech.SynthesizeWavAsync(text, lang, _voice);
+            string voice = KebbiBrain.Config.VoiceForLang(lang, _voice);   // 依語言挑聲線(中文用中文聲、印尼語用印尼聲)
+            byte[] wav = await _speech.SynthesizeWavAsync(text, lang, voice);
             string path = Path.Combine(_outDir, "say_" + (++_seq).ToString("00") + ".wav");
             File.WriteAllBytes(path, wav);
-            _out("   🗣️  [Kebbi 說/" + lang + "/" + _voice + "] 「" + text + "」 → " + path);
+            _out("   🗣️  [Kebbi 說/" + lang + "/" + voice + "] 「" + text + "」 → " + path);
             TryPlay(path);
         }
 
