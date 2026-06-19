@@ -41,6 +41,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--g3r") >= 0) { await PlayG3RewindDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--g3f") >= 0) { await PlayG3FrameDemoAsync(); return 0; }
+
             if (Array.IndexOf(args, "--g2v") >= 0) { await PlayG2ValidatorDemoAsync(); return 0; }
 
 #if !UNITY
@@ -73,6 +75,7 @@ namespace KebbiBrain
             Console.WriteLine("  --g5t             G5 七步審判驅動器 + 學生席舉手插話分支");
             Console.WriteLine("  --g4t             G4 裁判賽多輪排名（視角轉換 + 聲源核對）");
             Console.WriteLine("  --g3r             G3 鏡像教練:逐幀回退(喊「再一次」回退一幀重示範,手冊 step4)");
+            Console.WriteLine("  --g3f             G3 動作幀資料化:單幀自訂停留 HoldMs + 整組循環 Move.Loops");
             Console.WriteLine("  --g2v             G2 學生自編腳本驗證(結構把關:缺步/層次錯置→才放行接力)");
             Console.WriteLine("  --test            跑自我測試(全綠)");
             Console.WriteLine("  --cloud-test      雲端自測(需 Azure/OpenAI 金鑰)");
@@ -650,6 +653,42 @@ namespace KebbiBrain
             log("→ 目前停在第 " + (game.CurrentFrame + 1) + " 幀（共 " + move.Frames.Count + " 幀），重新示範中：索引已由末幀回退一幀。");
 
             game.PrintSummary();
+            log("====================================================");
+        }
+
+        // G3《鏡像教練·動作幀資料化》Demo（純 Sim，免金鑰）——示範:① 單幀自訂停留 HoldMs(CPR 下壓刻意停 2 秒)、
+        // ② 整組循環 Move.Loops(暖身連做 3 組)、③ 降 BPM 後一般幀變慢、自訂 HoldMs 幀不受影響。
+        private static async Task PlayG3FrameDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var body = new SimKebbiBody(log, canMove: false);
+            var pose = new SimPoseSensor(log);
+            var ctx = new KebbiContext(body, new SimVoice(log), new SimLlm(log), log);
+            var game = new MirrorCoachGame(ctx, pose);
+
+            log("========== G3《鏡像教練·動作幀資料化》文字模擬器 Demo ==========");
+
+            // ① 自訂單幀停留:CPR 下壓那幀刻意停 2000ms(衛教強調),其餘幀依 BPM(60→1000ms)。
+            log("\n【① 單幀自訂停留 HoldMs ▶ CPR 下壓刻意停 2 秒，其餘依 BPM】");
+            var cpr = new MirrorCoachGame.Move("CPR 按壓");
+            cpr.Frames.Add(new MirrorCoachGame.JointFrame("預備:雙臂前伸").Set(KebbiMotor.RShoulderY, 70f).Set(KebbiMotor.LShoulderY, 70f));
+            cpr.Frames.Add(new MirrorCoachGame.JointFrame("下壓:肘打直下壓(停 2 秒強調)").Set(KebbiMotor.RShoulderY, 100f).Set(KebbiMotor.LShoulderY, 100f).Hold(2000));
+            cpr.Frames.Add(new MirrorCoachGame.JointFrame("回彈:回到預備").Set(KebbiMotor.RShoulderY, 70f).Set(KebbiMotor.LShoulderY, 70f));
+            await game.PlayMoveAsync(cpr);
+            log("→ 下壓幀停留 " + game.FrameHoldMs(cpr.Frames[1]) + "ms(自訂)、預備幀停留 " + game.FrameHoldMs(cpr.Frames[0]) + "ms(依 BPM)");
+
+            // ② 整組循環:暖身連做 3 組(Move.Loops=3),FramesPlayed 累計 = 幀數×3。
+            log("\n【② 整組循環 Move.Loops ▶ 暖身連做 3 組】");
+            var warm = MirrorCoachGame.MakeWarmup().Repeat(3);   // 3 幀 × 3 組
+            await game.PlayMoveAsync(warm);
+            log("→ 共播放 " + game.FramesPlayed + " 幀(= " + warm.Frames.Count + " 幀 × " + warm.Loops + " 組)");
+
+            // ③ 學生喊「太快了」→ DOA 轉頭 + 降 BPM;之後一般幀變慢,自訂 HoldMs 幀不受影響。
+            log("\n【③ 降 BPM 後 ▶ 一般幀跟著變慢、自訂 HoldMs 幀不受影響】");
+            await game.HandleTooFastAsync(30f);   // BPM 60→45
+            log("→ 降速後:一般幀 " + game.FrameHoldMs(cpr.Frames[0]) + "ms(隨 BPM 變慢)、CPR 下壓幀仍 " + game.FrameHoldMs(cpr.Frames[1]) + "ms(自訂不變)");
+
+            log("\n=== 重點:每幀可獨立設停留時間(衛教強調幀停久)、整組可循環(暖身連做)、降速只影響未自訂的幀 ===");
             log("====================================================");
         }
 

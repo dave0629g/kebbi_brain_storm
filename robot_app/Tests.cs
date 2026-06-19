@@ -51,6 +51,7 @@ namespace KebbiBrain
             T_G5_Trial();
             T_G4_Judge();
             T_G3_Rewind();
+            T_G3_Frame();
             T_G2_Validator();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
@@ -1429,6 +1430,57 @@ namespace KebbiBrain
             pose8.Enqueue(false);                  // 姿態錯誤,但不注入語音
             g8.RunRepAsync(App.MirrorCoachGame.MakeWarmup()).GetAwaiter().GetResult();
             Check("G3rewind-向後相容:沒注入『再一次』→ 不誤觸發、CurrentFrame 仍停末幀 2", g8.CurrentFrame == 2);
+        }
+
+        // G3 動作幀資料化:JointFrame.HoldMs 自訂單幀停留(覆寫 BPM)、Move.Loops 整組循環。
+        // FrameHoldMs/FramesPlayed 可純驗(不真 sleep);Loops=1 且無 HoldMs = 完全等價舊版(向後相容)。
+        private static void T_G3_Frame()
+        {
+            Action<string> noop = _ => { };
+            var game = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+
+            // (1) FrameHoldMs:無 HoldMs → 依 BPM(預設 60 → 每拍 1000ms)
+            var plain = new App.MirrorCoachGame.JointFrame("一般").Set(KebbiMotor.RShoulderY, 0f);
+            Check("G3幀-無 HoldMs 依 BPM(60→1000ms)", plain.HoldMs == null && game.FrameHoldMs(plain) == 1000);
+
+            // (2) FrameHoldMs:有 HoldMs → 用自訂值(不受 BPM 影響)
+            var held = new App.MirrorCoachGame.JointFrame("停久").Set(KebbiMotor.RShoulderY, 0f).Hold(2000);
+            Check("G3幀-自訂 HoldMs=2000 覆寫 BPM", held.HoldMs == 2000 && game.FrameHoldMs(held) == 2000);
+
+            // (3) 混用:同組內自訂與無自訂幀 → 各取各的時長
+            Check("G3幀-混用:自訂幀=2000、一般幀=1000", game.FrameHoldMs(held) == 2000 && game.FrameHoldMs(plain) == 1000);
+
+            // (4) 降速:HandleTooFastAsync → BPM 60→45;一般幀跟 BPM(→1333ms),自訂幀不受影響(仍 2000)
+            game.HandleTooFastAsync(0f).GetAwaiter().GetResult();
+            Check("G3幀-降速後一般幀依新 BPM(45→1333ms)", game.FrameHoldMs(plain) == (int)(60000.0 / 45));
+            Check("G3幀-降速後自訂幀仍=2000(不受 BPM)", game.FrameHoldMs(held) == 2000);
+
+            // (5) Move.Loops 預設 1:播一次 → FramesPlayed==幀數、停末幀(等價舊版)
+            var g2 = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+            var warm = App.MirrorCoachGame.MakeWarmup();   // 3 幀
+            Check("G3幀-Move.Loops 預設=1", warm.Loops == 1);
+            g2.PlayMoveAsync(warm).GetAwaiter().GetResult();
+            Check("G3幀-Loops=1:FramesPlayed==3、停末幀 2(等價舊版)", g2.FramesPlayed == 3 && g2.CurrentFrame == 2);
+
+            // (6) Move.Loops=2(Repeat):整組重播兩次 → FramesPlayed==6、末幀索引仍 2
+            var g3 = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+            var warm2 = App.MirrorCoachGame.MakeWarmup().Repeat(2);
+            Check("G3幀-Repeat(2) 設 Loops=2", warm2.Loops == 2);
+            g3.PlayMoveAsync(warm2).GetAwaiter().GetResult();
+            Check("G3幀-Loops=2:FramesPlayed==6、CurrentFrame 末幀 2", g3.FramesPlayed == 6 && g3.CurrentFrame == 2);
+
+            // (7) Repeat 夾住:Repeat(0)/負數 → Loops 至少 1(不會 0 次或負)
+            Check("G3幀-Repeat(0) 夾為 1", App.MirrorCoachGame.MakeWarmup().Repeat(0).Loops == 1);
+
+            // (8) RunSessionAsync 內單組 Loops=2 → 該組仍重播兩次(FramesPlayed==6),Reps 仍只 +1
+            var g4 = new App.MirrorCoachGame(SilentSim(out _, out _), new SimPoseSensor(noop));
+            var routine = new System.Collections.Generic.List<App.MirrorCoachGame.Move> { App.MirrorCoachGame.MakeWarmup().Repeat(2) };
+            g4.RunSessionAsync(routine).GetAwaiter().GetResult();
+            Check("G3幀-Session 內 Loops=2:FramesPlayed==6、Reps==1", g4.FramesPlayed == 6 && g4.Reps == 1);
+
+            // (9) 可重入:同實例第二次 PlayMoveAsync(Loops=2) → FramesPlayed 歸零重算==6(不累加)
+            g3.PlayMoveAsync(App.MirrorCoachGame.MakeWarmup().Repeat(2)).GetAwaiter().GetResult();
+            Check("G3幀-可重入:第二次 Loops=2 FramesPlayed 重算==6(不累加)", g3.FramesPlayed == 6);
         }
 
         // G2 學生自編走位腳本「結構驗證器」:ValidateScript 對證明步驟序列把關

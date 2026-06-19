@@ -24,25 +24,36 @@ namespace KebbiBrain.App
         public int CurrentFrame { get; private set; } = -1;
         public Move CurrentMove { get; private set; }
 
+        // G3-frame：本場累計已播幀數(含循環、含重示範)。PlayMoveAsync 開頭歸零 → 可重入、可驗循環次數。
+        public int FramesPlayed { get; private set; }
+
+        // 該幀實際停留毫秒：有自訂 HoldMs 就用自訂,否則依目前 BPM 換算(每拍)。供 PlayFrame 與自測共用。
+        public int FrameHoldMs(JointFrame f) => f.HoldMs ?? (int)(60000.0 / Math.Max(1, Bpm));
+
         // 觸發「再一次」的關鍵字(手冊 step4)。比對用 Contains,容錯口語。
         private const string AgainPhrase = "再一次";
 
         public MirrorCoachGame(KebbiContext ctx, IPoseSensor pose) { _ctx = ctx; _pose = pose; }
 
-        // 一個動作幀：標籤 + 一組(馬達, 角度)
+        // 一個動作幀：標籤 + 一組(馬達, 角度)。可選 HoldMs：本幀自訂停留毫秒(null=依 Move BPM 換算,向後相容)。
+        // 用途：讓某些幀刻意停久(如 CPR 下壓停 2 秒強調、太極沉落慢拍),不必整組改 BPM。
         public sealed class JointFrame
         {
             public string Label;
             public List<KeyValuePair<KebbiMotor, float>> Targets = new List<KeyValuePair<KebbiMotor, float>>();
+            public int? HoldMs;   // null=用 BPM 換算;非 null=本幀停留毫秒(覆寫)
             public JointFrame(string label) { Label = label; }
             public JointFrame Set(KebbiMotor m, float deg) { Targets.Add(new KeyValuePair<KebbiMotor, float>(m, deg)); return this; }
+            public JointFrame Hold(int ms) { HoldMs = ms; return this; }   // 流暢設定本幀自訂停留
         }
 
         public sealed class Move
         {
             public string Name;
             public List<JointFrame> Frames = new List<JointFrame>();
+            public int Loops = 1;   // 整組循環次數(預設 1=播一次,向後相容)。用於暖身重複 N 組等。
             public Move(string name) { Name = name; }
+            public Move Repeat(int loops) { Loops = System.Math.Max(1, loops); return this; }   // 流暢設定循環次數
         }
 
         // 內建暖身動作：上肢開合（雙臂下垂 → 平舉 → 下垂），只用肩關節 Y 軸。
@@ -112,21 +123,27 @@ namespace KebbiBrain.App
         // 抽出單幀播放（PlayMoveAsync 與 HandleAgainAsync 共用）：真正把該幀的(馬達,角度)送出 + Log + 設 CurrentFrame。
         private void PlayFrame(Move move, int index)
         {
-            int holdMs = (int)(60000.0 / Math.Max(1, Bpm));
             var f = move.Frames[index];
+            int holdMs = FrameHoldMs(f);                         // 自訂 HoldMs 優先,否則依 BPM
             foreach (var t in f.Targets) _ctx.Body.SetMotor(t.Key, t.Value);
             CurrentFrame = index;                                // ← 索引前進(或回退重示範)到此幀
+            FramesPlayed++;                                      // 累計播放幀數(含循環/重示範)
             _ctx.Log("   🤸 [示範] (" + (index + 1) + "/" + move.Frames.Count + ") "
-                     + f.Label + "（停留 " + holdMs + "ms @ " + Bpm + " BPM）");
+                     + f.Label + "（停留 " + holdMs + "ms" + (f.HoldMs.HasValue ? "·自訂" : " @ " + Bpm + " BPM") + "）");
         }
 
-        // 逐幀示範（依 BPM 決定每拍停留；不真的 sleep，以保持自測快速）。
-        // G3-rewind：重置場狀態 + for 迴圈逐幀呼叫 PlayFrame——對外行為完全等價舊版(仍播完整組、末幀手臂歸位)。可重入。
+        // 逐幀示範（依 BPM 或自訂 HoldMs 決定每拍停留；不真的 sleep，以保持自測快速）。
+        // G3-rewind/frame：重置場狀態 + 外層 Loops 迴圈包逐幀 PlayFrame。Loops=1 時對外行為完全等價舊版。可重入。
         public async Task PlayMoveAsync(Move move)
         {
-            CurrentMove = move; CurrentFrame = -1;               // 可重入：每組重置索引
+            CurrentMove = move; CurrentFrame = -1; FramesPlayed = 0;   // 可重入：每組重置索引/幀計數
             await _ctx.Voice.SpeakAsync("跟我做：" + move.Name + "（我的左手＝你的右手）", "zh-TW");
-            for (int i = 0; i < move.Frames.Count; i++) PlayFrame(move, i);
+            int loops = Math.Max(1, move.Loops);
+            for (int loop = 0; loop < loops; loop++)
+            {
+                if (loops > 1) _ctx.Log("   🔁 第 " + (loop + 1) + "/" + loops + " 次循環");
+                for (int i = 0; i < move.Frames.Count; i++) PlayFrame(move, i);
+            }
         }
 
         // 純狀態回退一幀（無 I/O，可單測）。
