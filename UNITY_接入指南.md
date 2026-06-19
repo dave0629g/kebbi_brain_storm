@@ -1,7 +1,13 @@
 # Unity 實機接入指南（robot_app → Kebbi）
 
-> 同一份遊戲邏輯（`src/Hardware`/`Sim`/`App`）已在主控台用 Sim 後端驗證（47/47）。本指南把它接到 **Unity + NuwaUnity SDK** 上實體 Kebbi。
+> 同一份遊戲邏輯（`src/Hardware`/`Sim`/`App`）已在主控台用 Sim 後端驗證（**344/344**）。本指南把它接到 **Unity + NuwaUnity SDK** 上實體 Kebbi。
 > ⚠️ Unity 專屬程式（`src/Real/*`）只在 Unity 編譯（`#if UNITY`），這台主控台測不到 → **最終以 Unity 實機編譯/實機實測為準**。
+
+> ## ✅ 現況（2026-06-19）：Unity 專案已建好、APK 已出，第 1~4 節等於「已完成的紀錄」
+> - **專案**：`~/Projects/KebbiBrainUnity`（Unity **2022.3.62f3**）。`Assets/Scripts/` 下 **App/Hardware/Real/Sim 四個資料夾是 symlink**（軟連結）指向 `robot_app/src/*`，`Config.cs`/`KebbiFactory.cs` 為實檔；**`Cloud/` 刻意不接**（Unity 走 `Real/RealBackends.cs` 的 `UnityWebRequest`）。→ 改 `robot_app/src` 會即時反映到 Unity，雙向同步。
+> - **編譯符號**：`Assets/csc.rsp = -define:UNITY`。**建置入口**：`Assets/Editor/KebbiBuild.cs` → `BuildApk`（真機版 `useRealRobotApi=true`）/`BuildMiddlewareApk`（中介版 `false`）。
+> - **已出 APK**：`Build/kebbi-arm64.apk` 與 `Build/kebbi-middleware-arm64.apk`（各 ~9.5MB，IL2CPP/ARM64 AOT 過、含整段 `#if UNITY` 的 src/Real）。
+> - **👉 你現在要做的就是第 7 節「裝機測試 runbook」**：把 `kebbi-middleware-arm64.apk` 裝到一般 Android 手機跑 TTS/STT/LLM/UI（不需真凱比），把結果/logcat 回報。
 
 ## 0. 前置
 - Unity **2022.3.62f3**（與 NuwaSDK 對齊）、Android Studio。
@@ -10,8 +16,9 @@
 
 ## 1. 把程式放進 Unity
 1. 新建 Unity 2022.3.62f3 專案 → import NuwaUnity unitypackage，放入 NuwaSDK aar。
-2. 複製 `robot_app/src/` 的 **Hardware / Sim / App / Real / Config.cs / KebbiFactory.cs** 到 `Assets/Scripts/`。
-   - **不要**複製 `Program.cs` 與 `Tests.cs`（那是主控台專用）。
+2. 把 `robot_app/src/` 的 **Hardware / Sim / App / Real** 與 **Config.cs / KebbiFactory.cs** 放進 `Assets/Scripts/`。
+   - **`KebbiBrainUnity` 用的是 symlink（軟連結）而非複製** → 改 robot_app/src 即時同步到 Unity，不必重貼。（新開專案若不想 symlink，複製亦可，但改 code 要重貼。）
+   - **不要**放 `Program.cs`、`Tests.cs`（主控台專用），也**不要**接 `src/Cloud/`（Unity 用 UnityWebRequest，Cloud 是 console 專用）。
 3. **Player Settings → Scripting Define Symbols 加入 `UNITY`**。
    - 這樣才會編譯 `src/Real/*`；同時 `src/Cloud/*`（`#if !UNITY`）會被排除（Unity 改用 UnityWebRequest）。
 
@@ -68,13 +75,18 @@ new KebbiBrain.Hardware.BodyCommandReceiver(link, body); // 收到 BC|… 命令
   ⚠️ **AVD 模擬器彼此網路隔離(NAT)，UDP 廣播多半互通不到** → 多機請用真手機；模擬器只適合單機測。
 - DOA 在階2 沒有真麥陣列 → 用螢幕按鈕/腳本設 `SimKebbiBody.CurrentDoa` 餵值（測試 UI 待補）。
 
-## 4. Build & 部署
+## 4. Build（已可用 batchmode 一鍵出，KebbiBrainUnity 已驗證）
 ```bash
-# Unity: File → Build Settings → Android → Build（出 arm64 APK）
-adb install -r kebbi.apk
-adb shell am start -n <package>/<activity>
-adb logcat -d | grep -iE "auth|licence|kebbi|denied|TTS|STT|OpenAI|Anthropic"
-# 截圖前先喚醒避免 Doze 黑屏：adb shell input keyevent KEYCODE_WAKEUP
+UNITY="/Applications/Unity/Hub/Editor/2022.3.62f3/Unity.app/Contents/MacOS/Unity"
+PROJ=~/Projects/KebbiBrainUnity
+# ⚠️ 同專案第二次 batchmode 會卡在「Loaded All Assemblies」→ 每次 build 前清快取強制完整匯入：
+rm -rf "$PROJ"/{Library,Temp,Logs}
+# 中介版(useRealRobotApi=false，跑一般 Android 測語音/LLM/UI/UDP)：
+"$UNITY" -batchmode -quit -projectPath "$PROJ" -buildTarget Android \
+  -executeMethod KebbiBuild.BuildMiddlewareApk -logFile /tmp/kbu.log
+# 真機版(useRealRobotApi=true，上真凱比)：-executeMethod KebbiBuild.BuildApk
+grep -E "error CS|Exiting batchmode|Build succeeded" /tmp/kbu.log
+# 產出：$PROJ/Build/kebbi-middleware-arm64.apk（或 kebbi-arm64.apk）。約 8~9 分鐘、需關 sandbox、磁碟 ≥3GB。
 ```
 
 ## 5. ⚠️ 上線前必測（對齊 進度追蹤.md「需要的資訊」）
@@ -96,3 +108,36 @@ adb logcat -d | grep -iE "auth|licence|kebbi|denied|TTS|STT|OpenAI|Anthropic"
 - UnityWebRequest 以 `op.completed` 包成 Task（主執行緒回呼，免 UniTask）。
 
 > 轉頭一律「讀 DOA + 自寫 NeckZ」(不用會被授權牆擋的 turnToDOA)；說話走雲端(不用內建 TTS，內建無印尼語)；動作逐幀 setMotor(不用 motionPlay)。
+
+---
+
+## 7. 📱 裝機測試 runbook（階2：一般 Android 手機跑中介版，不需真凱比）
+> 目標：用 `kebbi-middleware-arm64.apk` 驗「除馬達/DOA 外的所有功能」——TTS 出聲 / STT 收音 / LLM 回覆 / UI 流程。`useRealRobotApi=false` → 機身用 SimKebbiBody（不呼叫 NuwaRobotAPI，故一般 Android 不會崩），但語音/LLM/UDP 都是真的。
+
+**前置（金鑰要在 build 前就進 APK）**
+- 中介版 APK 的金鑰來自 build 時打包進去的 `KebbiSecrets.asset`（見第 3 節）。**若先前 build 時 `.asset` 沒填金鑰 → TTS/LLM 會無聲/失敗，要先在 Unity 填好金鑰再重 build 中介版**（第 4 節指令）。⚠️用完 rotate。
+- 確認手機已開「開發者選項 → USB 偵錯」，`adb devices` 看得到。
+
+**步驟**
+```bash
+APK=~/Projects/KebbiBrainUnity/Build/kebbi-middleware-arm64.apk
+adb install -r "$APK"
+adb shell pm list packages | grep kebbibrain          # 確認套件名 com.kebbibrain.app
+adb shell input keyevent KEYCODE_WAKEUP               # 喚醒避免 Doze 黑屏
+adb shell am start -n com.kebbibrain.app/com.unity3d.player.UnityPlayerActivity
+# 另開一個視窗即時看 log（過濾關鍵字）：
+adb logcat -c && adb logcat | grep -iE "kebbi|TTS|STT|Azure|OpenAI|Anthropic|DOA|denied|exception|auth|licen"
+```
+
+**逐項檢查（把結果回報我，含對應 logcat 片段）**
+| # | 看什麼 | 通過樣子 | 失敗樣子/下一步 |
+|---|---|---|---|
+| 1 | App 起得來、不閃退 | 進到 G4 預設畫面、Unity log 無 fatal | 閃退→貼 `adb logcat` 的 `FATAL`/`Exception` 給我 |
+| 2 | **TTS 出聲**（印尼語）| 手機喇叭真的唸出 `Katakan: Saya di sini!` 等台詞 | 無聲→看 log 有無 `Azure`/`401`/`riff`；多半是金鑰沒進 `.asset` 或 region 錯 |
+| 3 | **STT 收音** | 對手機說話，log 出現辨識文字（`heard=...`）| 收不到→必測①搶麥（系統持麥 `Microphone.Start` 拿不到 PCM）；貼 log |
+| 4 | **LLM 回覆** | 答錯方位時 Kebbi 唸出一句針對性糾錯（UnityLlm 回來的 tip）| 無回覆→看 log `OpenAI`/`Anthropic`/HTTP 狀態碼 |
+| 5 | UI/流程 | 校準→出題→轉頭(NeckZ 動畫)→計分一輪能跑完 | 卡住→貼卡在哪一步的 log |
+
+**通過後 → 多機（必測④）**：第 5 節表格④——2 台真手機同 WiFi、各設不同 `RobotId`+`Mode=LinkPingTest`，看互收 `ping`。模擬器(AVD)UDP 廣播多半不通，務必用真手機。
+
+> 註：DOA 在階2 無真麥陣列 → 用腳本/螢幕按鈕餵 `SimKebbiBody.CurrentDoa`（測試 UI 待補）。真正的馬達/DOA/搶麥要上真凱比（裝 `kebbi-arm64.apk` 真機版）才驗得到。
