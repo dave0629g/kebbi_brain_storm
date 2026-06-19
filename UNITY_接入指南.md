@@ -97,10 +97,11 @@ grep -E "error CS|Exiting batchmode|Build succeeded" /tmp/kbu.log
 | ③ move 授權牆 | 輪式機下 `move(0.1)` 1 秒看是否真動（靜默=被擋） | 走定點版 |
 | ④ 雙機收送 | 兩台同 WiFi，各掛 `KebbiAppBehaviour` 設 `Mode=LinkPingTest`、不同 `RobotId` → 看 logcat 是否互收到 `ping`（`UnityRobotLink` UDP 廣播） | 退單機；或檢查 AP 是否擋廣播/換 TCP 直連 |
 | ⑤ DOA 解析度 | 各方位出聲比對 `getDirectionOfDOA()` 誤差、正後方/非語音是否更新 | 降扇區/排除正後方 |
-| ⑥ NeckZ 角度範圍 | 往復 `setMotor`+`getMotor` 量上下限，填回 `UnityKebbiBody.NeckZMin/MaxDeg` | — |
+| ⑥ NeckZ 角度範圍 | **官方表已給 ±40°（neck_z）→ 已填入 `SimKebbiBody`/`RealBackends`**；上實機再往復 `ctlMotor`+`getMotorPresentPositionInDegree` 核對零點/正負向 | 偏差大→修正常數 |
 
 ## 6. 已內建（RealBackends.cs，照已驗證 REST 形狀）
 - **UnityKebbiBody**：`ctlMotor(id,度,速)` / `getMotorPresentPositionInDegree(id)` / `getDirectionOfDOA` / `move` / `turn`。
+  > 📐 **官方馬達角度表**（`NUWA_Robot_SDK_en.html`，10 馬達）：neck_y(1)±20、**neck_z(2)±40**、shoulder_z(3/7) −85~5、shoulder_y(4/8) −200~70、shoulder_x(5/9) −3~100、肘 bow_y(6/10) −80~0；`move`±0.2m/s、`turn`±30°/s。**NeckZ ±40 已填入 SimKebbiBody/RealBackends（取代 ±90 佔位）→ 實機頭轉不到正右/正左(90°)，只 Depan/serong 可達**。shoulder_y「舉手=100」超過 max70 待實機確認零點後 remap。
   > ⚠️ 已對真 NuwaSDK 2.1.0.08 aar 反查校正(2026-06-18,用參考專案 `~/Projects/UnityKebbi` 內附 aar)：早先寫的 `setMotorPositionInDegree` **不存在**(改 `ctlMotor`)、`getMotorPresentPossitionInDegree` **拼字錯**(改 `Position` 單 s)。馬達 ID = `MOTOR_*` 常數(`KebbiMotor` enum 值已驗證一致)。`ctlMotor` 的(度,速)語意仍以實機往復量測為準。
 - **UnityVoice**：Azure TTS（SSML→`riff-16khz-16bit-mono-pcm`→`WavUtil.ToAudioClip`→AudioSource）；STT（Microphone 錄 16k→`WavUtil.FromAudioClip`→Azure STT）。
 - **UnityLlm**：依金鑰前綴打 OpenAI(`/v1/chat/completions`) 或 Anthropic(`/v1/messages`)；JSON 用 `JsonUtility`（免額外套件）。
