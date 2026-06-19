@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -52,6 +52,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.LinkPingTest: await RunLinkPingTestAsync(); break;
             case Mode.G1Director: await RunG1DirectorAsync(); break;
             case Mode.G5Director: await RunG5DirectorAsync(); break;
+            case Mode.G2Director: await RunG2DirectorAsync(); break;
             case Mode.Controlled: RunControlled(); break;
             default: await RunTebakArahAsync(); break;
         }
@@ -129,6 +130,26 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         Debug.Log("[G5Director] 中控=控方,辯方=遠端(" + peerRobotId + ");被控機請設 Mode=Controlled");
         await game.RunDebateAsync(DebateGame.MakeGalileoDebate());
         Debug.Log("[G5Director] 完成:控 " + game.ProVotes + " : 辯 " + game.DefVotes + " → " + game.Verdict);
+    }
+
+    // ── 多機・G2 中控(Director):跑既有 G2 幾何證明接力,本機=乙機(念理由),甲機的「機身」換成遠端代理(經 UDP)。
+    // 遊戲內部 乙機↔甲機 的 POINT/DONE 走本機 loopback bus;只有甲機「機身命令(BC|:走位+手臂指認)」出網路到被控機。
+    // 被控機 Mode=Controlled。比照 G1Director/G5Director(遊戲邏輯本機跑、只有遠端機身/語音出網路)。
+    private async Task RunG2DirectorAsync()
+    {
+        var realLink = new UnityRobotLink(robotId);
+        _link = realLink;
+        var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
+
+        var localBus = new SimRobotBus(Debug.Log);            // 乙機↔甲機 POINT/DONE(loopback,不出網路)
+        var guideLink = localBus.CreateLink("甲機");
+        var reasonerLink = localBus.CreateLink("乙機");
+        var guideBody = new RemoteBodyProxy(realLink, peerRobotId);  // 甲機機身(走位+手臂指認)→經 UDP
+
+        var game = new GeometryRelayGame(guideBody, guideLink, reasonerLink, ctx.Voice, Debug.Log); // 乙機語音=本機
+        Debug.Log("[G2Director] 中控=乙機,甲機=遠端(" + peerRobotId + ");被控機請設 Mode=Controlled");
+        await game.RunProofAsync(GeometryRelayGame.MakeIsoscelesProof());
+        Debug.Log("[G2Director] 完成:" + game.StepsDone + " 步接力");
     }
 
     // ── 多機・被控(Controlled):收到中控的機身命令(BC|…)就動、語音命令(VC|…)就用本機喇叭說;非命令訊息印出 ──
