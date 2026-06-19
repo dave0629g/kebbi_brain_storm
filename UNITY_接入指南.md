@@ -119,7 +119,8 @@ export KEBBI_SPEECH_KEY=...  KEBBI_SPEECH_REGION=southeastasia  KEBBI_LLM_KEY=..
 **步驟**
 ```bash
 APK=~/Projects/KebbiBrainUnity/Build/kebbi-middleware-arm64.apk
-adb install -r "$APK"
+adb install -r -g "$APK"                              # -g：安裝時自動授予所有 runtime 權限(免 app 內彈窗)
+# (補單一權限可用：adb shell pm grant com.kebbibrain.app android.permission.RECORD_AUDIO)
 adb shell pm list packages | grep kebbibrain          # 確認套件名 com.kebbibrain.app
 adb shell input keyevent KEYCODE_WAKEUP               # 喚醒避免 Doze 黑屏
 adb shell am start -n com.kebbibrain.app/com.unity3d.player.UnityPlayerActivity
