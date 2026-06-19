@@ -24,7 +24,8 @@ case "${1:-middleware}" in
   controlled) METHOD="KebbiBuild.BuildControlledApk" ;; # 被控機(收 BC| 套到本機 body 執行)
   g5director) METHOD="KebbiBuild.BuildG5DirectorApk" ;; # G5 分散式中控(辯方機身+語音 BC|/VC| 給遠端)
   g2director) METHOD="KebbiBuild.BuildG2DirectorApk" ;; # G2 分散式中控(甲機機身 BC| 給遠端;乙機語音本機)
-  converse)   METHOD="KebbiBuild.BuildConverseApk" ;;   # 兩台印尼語對話(各 persona,說完才交棒一來一往)
+  converse)   METHOD="KebbiBuild.BuildConverseApk" ;;   # 兩台印尼語對話(各 persona,文字直送交棒)
+  conversestt) METHOD="KebbiBuild.BuildConverseSttApk" ;; # STT 版:真·麥克風聽對方+STT→LLM→TTS(無網路)
   verify)     METHOD="KebbiBuild.VerifySecretsRoundTrip" ;;
   *) echo "用法: $0 [middleware|real|linkping|verify]"; exit 2 ;;
 esac

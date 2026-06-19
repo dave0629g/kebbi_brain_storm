@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -62,6 +62,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.G2Director: await RunG2DirectorAsync(); break;
             case Mode.Controlled: RunControlled(); break;
             case Mode.Converse: await RunConverseAsync(); break;
+            case Mode.ConverseStt: await RunConverseSttAsync(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -187,6 +188,19 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         Debug.Log("[Converse] " + personaName + "(" + robotId + ")↔" + peerRobotId +
                   "(" + me.Lang + ")," + (converseStarter ? "我先說" : "等對方先說"));
         await game.RunAsync(converseStarter, maxTurns: 0); // 0=持續對話直到 app 關
+    }
+
+    // ── STT 版「真·兩機聽說對話」(對比 Converse 的文字直送):無網路,用麥克風聽對方+STT→LLM→TTS ──
+    // 兩台擺近、麥克風對喇叭;其中一台 converseStarter=true 先開口。
+    private async Task RunConverseSttAsync()
+    {
+        var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
+        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = "id-ID" };
+        var game = new ConversationSttGame(ctx.Voice, ctx.Llm, me,
+                                           string.IsNullOrEmpty(peerName) ? "對方" : peerName, Debug.Log);
+        Debug.Log("[ConverseStt] " + personaName + " 用麥克風聽對方+STT 對話," +
+                  (converseStarter ? "我先說" : "先聽") + "(兩台請擺近)");
+        await game.RunAsync(converseStarter, maxTurns: 0);
     }
 
     // peerIp 欄位("1.2.3.4" 或逗號分隔多台)→ 去空白/空項的陣列;空則回 null(純廣播)。

@@ -28,6 +28,7 @@ namespace KebbiBrain
             T_RobotLinkProtocol();
             T_PeerRegistry();
             T_Conversation();
+            T_ConversationStt();
             T_RemoteBody();
             T_RemoteVoice();
             T_RemoteVoiceDone();
@@ -283,6 +284,29 @@ namespace KebbiBrain
             Check("協定-廣播→收", RobotLinkProtocol.ShouldDeliver("A", RobotLinkProtocol.All, "B"));
             Check("協定-非給我→丟", !RobotLinkProtocol.ShouldDeliver("A", "C", "B"));
             Check("協定-自己廣播回來→丟", !RobotLinkProtocol.ShouldDeliver("B", RobotLinkProtocol.All, "B"));
+        }
+
+        private static void T_ConversationStt()
+        {
+            Action<string> noop = _ => { };
+            var me = new App.ConversationGame.Persona { Name = "Andi", Character = "periang.", Lang = "id-ID" };
+
+            // (1) 聽得到對方 → 一來一往交替
+            var v = new RecordingVoice();
+            v.EnqueueHeard("Halo Andi, apa kabar?"); // STT「聽到」對方一句
+            var g = new App.ConversationSttGame(v, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0 };
+            bool done = System.Threading.Tasks.Task.Run(() => g.RunAsync(starter: true, maxTurns: 2)).Wait(5000);
+            Check("STT對話-完成不卡死", done);
+            Check("STT對話-講了 2 句(印尼語)", g.MyTurns == 2 && v.Spoken.Count == 2 && v.LastLang == "id-ID");
+            Check("STT對話-歷史含聽到的對方台詞", string.Join("|", g.History).Contains("Budi: Halo Andi"));
+
+            // (2) 聽不到對方(STT 全空)→ 主動打破沉默(自我修正,不卡死)
+            var v2 = new RecordingVoice(); // 沒 EnqueueHeard → ListenAsync 一律回 ""
+            var g2 = new App.ConversationSttGame(v2, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0, MaxListenRetries = 3 };
+            bool done2 = System.Threading.Tasks.Task.Run(() => g2.RunAsync(starter: false, maxTurns: 1)).Wait(5000);
+            Check("STT對話-聽不到也不卡死", done2);
+            Check("STT對話-沒聽到→主動開口打破沉默", g2.MyTurns >= 1 && v2.Spoken.Count >= 1);
+            Check("STT對話-記錄沒聽到次數", g2.MissedListens == 3);
         }
 
         private static void T_Conversation()
