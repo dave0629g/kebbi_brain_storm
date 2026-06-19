@@ -669,12 +669,12 @@ namespace KebbiBrain
             var r2 = await game.ForwardRoundAsync(Dir.BelakangKiri);
             log("→ " + (r2.LanguageCorrect ? "解析正確 ✔ = belakang kiri（左後）" : "解析錯 ✘"));
 
-            log("\n（▶ 馬達可達性決定判決：問正後方(180°)，頭 NeckZ 只能 ±90 → 回報最近可達扇區）");
+            log("\n（▶ 馬達可達性決定判決：問正後方(180°)，頭 NeckZ 實機只能 ±40 → 回報最近可達扇區）");
             float faced = KebbiHead.TurnToward(body, 180f, out bool reachable, out Dir reached);
             log("   🤖 聲源在正後方 180°，頭轉到 " + faced.ToString("0") + "°（"
                 + (reachable ? "可達" : "不可達") + "）→ 實際面向最近可達扇區：" + Direction.ToZh(reached) + " / " + Direction.ToIndo(reached));
 
-            log("\n=== 重點：方位從 4 向細到 8 向(serong 斜向)、印尼語複合詞解析、NeckZ 物理可達性決定『實際面向扇區』(正後方降級到右) ===");
+            log("\n=== 重點：方位從 4 向細到 8 向(serong 斜向)、印尼語複合詞解析、NeckZ 物理可達性(實機 ±40)決定『實際面向扇區』(正後方只能降級到右前 serong) ===");
             log("====================================================");
         }
 

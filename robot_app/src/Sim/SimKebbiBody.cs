@@ -54,8 +54,9 @@ namespace KebbiBrain.Sim
             _out("   ⏹️  [底盤] 停");
         }
 
-        // 頭部偏擺實測可達範圍（模擬值；real 後端以真機量測填入）。刻意 < 180 表示頭轉不到正後方。
-        public float NeckZMinDeg => -90f;
-        public float NeckZMaxDeg => 90f;
+        // 頭部偏擺可達範圍：官方 NUWA SDK 馬達表 neck_z = ±40°（取代先前 ±90 佔位）。
+        // 含意：頭轉不到正右/正左(90°)更不用說正後方 → 側邊學生只能「部分面向」(reachable=false)。
+        public float NeckZMinDeg => -40f;
+        public float NeckZMaxDeg => 40f;
     }
 }

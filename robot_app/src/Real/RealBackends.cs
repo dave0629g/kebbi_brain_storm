@@ -96,9 +96,9 @@ namespace KebbiBrain.Real
         public void Turn(float degPerSec) => _api.Call("turn", degPerSec);
         public void StopWheels() { _api.Call("move", 0f); _api.Call("turn", 0f); }
 
-        // TODO: 用 set/get Motor 往復量測 NeckZ 真實上下限後填入
-        public float NeckZMinDeg => -90f;
-        public float NeckZMaxDeg => 90f;
+        // 官方 NUWA SDK 馬達表 neck_z = ±40°；上實機再以 ctlMotor+getMotorPresentPositionInDegree 往復核對零點/正負向。
+        public float NeckZMinDeg => -40f;
+        public float NeckZMaxDeg => 40f;
     }
 
     // ── 語音：Azure 印尼語 TTS/STT（UnityWebRequest）──

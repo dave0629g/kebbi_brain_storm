@@ -96,7 +96,7 @@ namespace KebbiBrain
         {
             var ctx = SilentSim(out var body, out _);
             float faced = KebbiHead.TurnToward(body, 170f, out bool reachable);
-            Check("正後方頭被夾限到 90°", Math.Abs(faced - 90f) < 0.01f);
+            Check("正後方頭被夾限到 40°(NeckZ 實機 ±40)", Math.Abs(faced - 40f) < 0.01f);
             Check("正後方 reachable=false", reachable == false);
             float f2 = KebbiHead.TurnToward(body, 30f, out bool r2);
             Check("正前方 30° 可達", r2 && Math.Abs(f2 - 30f) < 0.01f);
@@ -163,13 +163,13 @@ namespace KebbiBrain
             // 平舉幀有實際設角(中間幀 80°)：再跑一拍但只驗 play 有送角→改驗 LShoulder 對稱
             Check("G3-末幀 LShoulderY 也歸位", Math.Abs(body.GetMotor(KebbiMotor.LShoulderY) - 0f) < 0.01f);
 
-            // 喊「太快了」(來自右邊 90°) → BPM 降低 + 頭轉向 90°
+            // 喊「太快了」(來自右邊 90°) → BPM 降低 + 頭朝該方向轉(但 NeckZ 實機 ±40 → 只能轉到 40°、部分面向)
             int before = game.Bpm;
             body.CurrentDoa = 90f;
             bool reachable = game.HandleTooFastAsync(body.ReadDoaDegrees()).GetAwaiter().GetResult();
             Check("G3-太快→BPM 降低", game.Bpm < before);
-            Check("G3-太快→頭轉向發問者(NeckZ≈90)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 90f) < 0.01f);
-            Check("G3-右側 90° 可完整面向", reachable);
+            Check("G3-太快→頭朝發問者轉到上限(NeckZ=40，±40 夾限)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 40f) < 0.01f);
+            Check("G3-右側 90° 超出頭部可達→只能部分面向(reachable=false)", !reachable);
 
             // 姿態錯誤 → 不加分
             int s = game.Score;
@@ -585,19 +585,21 @@ namespace KebbiBrain
         // 轉頭夾限邊界(正後/左後/恰好邊界/超界正規化)。
         private static void T_HeadClamp_Edges()
         {
-            var ctx = SilentSim(out var body, out _);
+            var ctx = SilentSim(out var body, out _);   // SimKebbiBody NeckZ 實機範圍 ±40
             float f1 = KebbiHead.TurnToward(body, -170f, out bool r1);
-            Check("左後 -170°→夾到 -90", Math.Abs(f1 + 90f) < 0.01f);
+            Check("左後 -170°→夾到 -40(±40 上限)", Math.Abs(f1 + 40f) < 0.01f);
             Check("左後 -170° 不可達", !r1);
             float f2 = KebbiHead.TurnToward(body, 90f, out bool r2);
-            Check("正右 90° 可達(邊界含)", r2 && Math.Abs(f2 - 90f) < 0.01f);
+            Check("正右 90°→夾到 40、不可達(頭轉不到 90)", !r2 && Math.Abs(f2 - 40f) < 0.01f);
             float f3 = KebbiHead.TurnToward(body, -90f, out bool r3);
-            Check("正左 -90° 可達(邊界含)", r3 && Math.Abs(f3 + 90f) < 0.01f);
-            float f4 = KebbiHead.TurnToward(body, 91f, out bool r4);
-            Check("91°→夾到 90、不可達", !r4 && Math.Abs(f4 - 90f) < 0.01f);
-            float f5 = KebbiHead.TurnToward(body, 200f, out bool r5); // 正規化→-160→夾 -90
-            Check("200°(正規化-160)→夾 -90、不可達", !r5 && Math.Abs(f5 + 90f) < 0.01f);
-            Check("TurnToward 有寫入 NeckZ", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) + 90f) < 0.01f);
+            Check("正左 -90°→夾到 -40、不可達", !r3 && Math.Abs(f3 + 40f) < 0.01f);
+            float f4 = KebbiHead.TurnToward(body, 40f, out bool r4);
+            Check("邊界 40° 恰可達", r4 && Math.Abs(f4 - 40f) < 0.01f);
+            float f5 = KebbiHead.TurnToward(body, 41f, out bool r5);
+            Check("41°→夾到 40、不可達", !r5 && Math.Abs(f5 - 40f) < 0.01f);
+            float f6 = KebbiHead.TurnToward(body, 200f, out bool r6); // 正規化→-160→夾 -40
+            Check("200°(正規化-160)→夾 -40、不可達", !r6 && Math.Abs(f6 + 40f) < 0.01f);
+            Check("TurnToward 有寫入 NeckZ", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) + 40f) < 0.01f);
         }
 
         // 機身命令邊角:負值(反向)、速度參數保留、Stop、壞/不足命令不丟例外。
@@ -794,10 +796,10 @@ namespace KebbiBrain
             game.ApproachCenterAsync().GetAwaiter().GetResult();
             Check("G5-中央逼近計數+1", game.CenterApproaches == 1);
 
-            // 學生在控方右側 45° 發言 → 控方頭轉向(NeckZ≈45)
-            bool faced = game.TurnToStudentAsync(true, 45f).GetAwaiter().GetResult();
-            Check("G5-轉向發言學生(NeckZ≈45)", Math.Abs(proBody.GetMotor(KebbiMotor.NeckZ) - 45f) < 0.01f);
-            Check("G5-45° 可完整面向", faced);
+            // 學生在控方右側 30° 發言(在 NeckZ ±40 內) → 控方頭轉向面對(NeckZ≈30、可完整面向)
+            bool faced = game.TurnToStudentAsync(true, 30f).GetAwaiter().GetResult();
+            Check("G5-轉向發言學生(NeckZ≈30)", Math.Abs(proBody.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.01f);
+            Check("G5-30°(在 ±40 內) 可完整面向", faced);
         }
 
         // G5 結辯投票計分:逐回合計票 → 宣判勝方、勝方結辯舉手;平手不舉;可重入。(G5 原本是全專案唯一沒有 Score 的遊戲)
@@ -1261,7 +1263,8 @@ namespace KebbiBrain
                 return g;
             }
 
-            // ── 1) 裁判賽-正確：A 說 "di kanan"、B 真值 DOA=90(Kanan) → Correct、A 計分、Faced=true ──
+            // ── 1) 裁判賽-正確：A 說 "di kanan"、B 真值 DOA=90(Kanan) → Correct、A 計分；
+            //    但 B 在 90° 超出頭部 ±40 → 只能部分面向(Faced=false，這是實機 NeckZ 真實限制) ──
             {
                 var g = Calibrated(out var body, out var voice);
                 body.CurrentDoa = 90f; voice.EnqueueHeard("Budi di kanan");
@@ -1269,7 +1272,7 @@ namespace KebbiBrain
                 Check("G4裁判-正確: Correct=true", r.Correct);
                 Check("G4裁判-正確: 真值=Kanan", r.ActualSector == Dir.Kanan);
                 Check("G4裁判-正確: A 計分(_matchScores[Andi]=1)", g.MatchScoreOf("Andi") == 1);
-                Check("G4裁判-正確: 轉頭面向 B 可達(Faced)", r.Faced);
+                Check("G4裁判-正確: B 在 90° 超出頭部 ±40 → 只能部分面向(Faced=false)", !r.Faced);
                 Check("G4裁判-正確: 不污染舊 Score", g.Score == 0);
             }
 
@@ -1429,22 +1432,22 @@ namespace KebbiBrain
             Check("8向-解析單詞 'belakang' 仍可", Direction.ParseIndo("di belakang") == Dir.Belakang);
             Check("8向-解析 'xyz'→null", Direction.ParseIndo("xyz") == null);
 
-            // (3) 最近可達扇區降級(NeckZ ±90):斜向 45° 可達不降級;右後/正後夾限到右
-            Check("8向-NearestReachable SerongKanan(45°)可達不降級", Direction.NearestReachable(Dir.SerongKanan, -90f, 90f) == Dir.SerongKanan);
-            Check("8向-NearestReachable BelakangKanan(135°)→Kanan", Direction.NearestReachable(Dir.BelakangKanan, -90f, 90f) == Dir.Kanan);
-            Check("8向-NearestReachable BelakangKiri(-135°)→Kiri", Direction.NearestReachable(Dir.BelakangKiri, -90f, 90f) == Dir.Kiri);
-            Check("8向-NearestReachable Belakang(180°)→Kanan(夾到+90)", Direction.NearestReachable(Dir.Belakang, -90f, 90f) == Dir.Kanan);
+            // (3) 最近可達扇區降級(實機 NeckZ ±40):斜向 45° 夾到 40 仍屬 SerongKanan;Kanan/正後皆只能夾到 serong
+            Check("8向-NearestReachable SerongKanan(45°)→夾40 仍 SerongKanan", Direction.NearestReachable(Dir.SerongKanan, -40f, 40f) == Dir.SerongKanan);
+            Check("8向-NearestReachable Kanan(90°)→SerongKanan(頭轉不到90)", Direction.NearestReachable(Dir.Kanan, -40f, 40f) == Dir.SerongKanan);
+            Check("8向-NearestReachable Belakang(180°)→SerongKanan(夾到+40)", Direction.NearestReachable(Dir.Belakang, -40f, 40f) == Dir.SerongKanan);
+            Check("8向-NearestReachable BelakangKiri(-135°)→SerongKiri(夾到-40)", Direction.NearestReachable(Dir.BelakangKiri, -40f, 40f) == Dir.SerongKiri);
 
-            // (4) TurnToward 多載回報「夾限後實際面向扇區」;舊 3 參數多載行為不變(回歸)
-            var body = new SimKebbiBody(noop, canMove: false);  // NeckZ ±90
+            // (4) TurnToward 多載回報「夾限後實際面向扇區」;舊 3 參數多載行為不變(回歸)。SimKebbiBody 實機 NeckZ ±40。
+            var body = new SimKebbiBody(noop, canMove: false);
             float f1 = KebbiHead.TurnToward(body, 45f, out bool reach1, out Dir sec1);
-            Check("8向-TurnToward(45°):可達、扇區=SerongKanan、NeckZ=45",
-                reach1 && sec1 == Dir.SerongKanan && Math.Abs(f1 - 45f) < 0.01f);
+            Check("8向-TurnToward(45°):夾到40、不可達、實際扇區=SerongKanan",
+                !reach1 && sec1 == Dir.SerongKanan && Math.Abs(f1 - 40f) < 0.01f);
             float f2 = KebbiHead.TurnToward(body, 170f, out bool reach2, out Dir sec2);
-            Check("8向-TurnToward(170°正後):不可達、夾到+90、實際扇區=Kanan",
-                !reach2 && sec2 == Dir.Kanan && Math.Abs(f2 - 90f) < 0.01f);
+            Check("8向-TurnToward(170°正後):不可達、夾到+40、實際扇區=SerongKanan",
+                !reach2 && sec2 == Dir.SerongKanan && Math.Abs(f2 - 40f) < 0.01f);
             float f3 = KebbiHead.TurnToward(body, 170f, out bool reach3);
-            Check("8向-舊 3 參數多載仍夾到+90、不可達(向後相容)", !reach3 && Math.Abs(f3 - 90f) < 0.01f);
+            Check("8向-舊 3 參數多載仍夾到+40、不可達(向後相容)", !reach3 && Math.Abs(f3 - 40f) < 0.01f);
 
             // (5) E2E 斜向題:校準 doa=45 的學生→Dir=SerongKanan;正向題用 'serong kanan' 答對得分
             var ctx = SilentSim(out var b, out var v);
