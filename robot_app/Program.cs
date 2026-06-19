@@ -45,6 +45,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--g2v") >= 0) { await PlayG2ValidatorDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--g2h") >= 0) { await PlayG2TurnHeadDemoAsync(); return 0; }
+
 #if !UNITY
             if (cloudTest) return await Cloud.CloudCheck.RunAsync(Console.WriteLine);
 #endif
@@ -77,6 +79,7 @@ namespace KebbiBrain
             Console.WriteLine("  --g3r             G3 鏡像教練:逐幀回退(喊「再一次」回退一幀重示範,手冊 step4)");
             Console.WriteLine("  --g3f             G3 動作幀資料化:單幀自訂停留 HoldMs + 整組循環 Move.Loops");
             Console.WriteLine("  --g2v             G2 學生自編腳本驗證(結構把關:缺步/層次錯置→才放行接力)");
+            Console.WriteLine("  --g2h             G2 甲機轉頭望向發言者(NeckZ 視線跟隨被討論圖素,再手臂指認)");
             Console.WriteLine("  --test            跑自我測試(全綠)");
             Console.WriteLine("  --cloud-test      雲端自測(需 Azure/OpenAI 金鑰)");
             Console.WriteLine("  --target cloudsim 真雲端跑 G4 整場 Demo(需金鑰)");
@@ -747,6 +750,30 @@ namespace KebbiBrain
             log("   （Kebbi：第 " + chk3.Step + " 步層次標錯了，改好再接力；StepsDone=" + g3.StepsDone + " 沒有接力）");
 
             log("\n=== 重點：腳本『結構』把關(缺步/層次錯置)→ 指出第幾步哪種錯 → 改正才放行接力 ===");
+            log("====================================================");
+        }
+
+        // G2《幾何證明接力站·甲機轉頭望向發言者》Demo（純 Sim）——示範:每步乙機說完,甲機先轉頭(NeckZ)望向
+        // 被討論的圖素/發言者,再手臂指認該邊。NeckZ 轉頭做「視線跟隨」是平板做不到的具身互動;TurnHeadToward 可為負(望左)。
+        private static async Task PlayG2TurnHeadDemoAsync()
+        {
+            Action<string> log = Console.WriteLine;
+            var guide = new SimKebbiBody(log, true);
+            var bus = new SimRobotBus(log);
+            var voice = new SimVoice(log);
+            var game = new GeometryRelayGame(guide, bus.CreateLink("甲機(指引)"), bus.CreateLink("乙機(推理)"), voice, log);
+
+            log("========== G2《幾何證明接力站·甲機轉頭望向發言者》Demo ==========");
+            log("（▶ 每步:乙機念理由 → 甲機先『轉頭望向』該圖素(NeckZ) → 再手臂指認該邊 → 回報接棒）");
+            log("（第 1/2/3 步分別轉頭 -45°(望左)/0°(望前)/+45°(望右)，示範視線跟隨被討論的幾何圖素）\n");
+
+            // 預排學生對學習單的正解(已知/因為/所以),讓示範聚焦在轉頭+指認,不被答錯提示打斷。
+            voice.EnqueueHeard("已知"); voice.EnqueueHeard("因為"); voice.EnqueueHeard("所以");
+            await game.RunProofAsync(GeometryRelayGame.MakeIsoscelesProofTurnHead());
+
+            log("\n→ 完成 " + game.StepsDone + " 步;甲機頭部最後停在 "
+                + guide.GetMotor(KebbiMotor.NeckZ).ToString("0") + "°(望右兩底角)");
+            log("=== 重點:甲機用 NeckZ 轉頭做『視線跟隨』(看向被討論的邊/角)再手臂指認——眼神接觸是平板做不到的具身互動 ===");
             log("====================================================");
         }
 

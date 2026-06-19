@@ -53,6 +53,7 @@ namespace KebbiBrain
             T_G3_Rewind();
             T_G3_Frame();
             T_G2_Validator();
+            T_G2_TurnHead();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -620,6 +621,61 @@ namespace KebbiBrain
             game.RunProofAsync(proof).GetAwaiter().GetResult();
             Check("G2-完成全部 3 步接力", game.StepsDone == 3);
             Check("G2-甲機手臂停在末步角度 80°", Math.Abs(guideBody.GetMotor(KebbiMotor.RShoulderY) - 80f) < 0.01f);
+        }
+
+        // G2 甲機轉頭望向發言者:Step.TurnHeadToward(NeckZ)有值才轉頭(可為負=望左),null=不轉頭(向後相容)。
+        // 轉頭在手臂指認之前;與既有走位/指認/DONE/學習單互不干擾;可重入。
+        private static void T_G2_TurnHead()
+        {
+            Action<string> noop = _ => { };
+            App.GeometryRelayGame NewGame(out SimKebbiBody guide, out SimVoice voice)
+            {
+                SilentSim(out guide, out voice);
+                var bus = new SimRobotBus(noop);
+                return new App.GeometryRelayGame(guide, bus.CreateLink("甲機"), bus.CreateLink("乙機"), voice, noop);
+            }
+            System.Collections.Generic.List<App.GeometryRelayGame.Step> One(App.GeometryRelayGame.Step s)
+                => new System.Collections.Generic.List<App.GeometryRelayGame.Step> { s };
+
+            // (1) TurnHeadToward=45 → NeckZ 轉到 45、手臂仍指認(RShoulderY=60)、完成 1 步
+            var g1 = NewGame(out var guide1, out _);
+            g1.RunProofAsync(One(new App.GeometryRelayGame.Step("因為AB=AC", "AB,AC", 60f, null, 45f))).GetAwaiter().GetResult();
+            Check("G2轉頭-TurnHead=45:NeckZ 轉到 45", Math.Abs(guide1.GetMotor(KebbiMotor.NeckZ) - 45f) < 0.01f);
+            Check("G2轉頭-轉頭同時手臂仍指認(RShoulderY=60)", Math.Abs(guide1.GetMotor(KebbiMotor.RShoulderY) - 60f) < 0.01f);
+            Check("G2轉頭-仍完成接力 1 步", g1.StepsDone == 1);
+
+            // (2) 負角度有效(望左):-45 不被當成「不轉頭」哨兵 → NeckZ=-45
+            var g2 = NewGame(out var guide2, out _);
+            g2.RunProofAsync(One(new App.GeometryRelayGame.Step("望左", "AB", 60f, null, -45f))).GetAwaiter().GetResult();
+            Check("G2轉頭-負角度有效:NeckZ=-45(望左,非哨兵)", Math.Abs(guide2.GetMotor(KebbiMotor.NeckZ) + 45f) < 0.01f);
+
+            // (3) 0° 有值=望正前(HasValue true):先撥 99,跑後 NeckZ 歸 0(真的下了轉頭命令)
+            var g3 = NewGame(out var guide3, out _);
+            guide3.SetMotor(KebbiMotor.NeckZ, 99f);
+            g3.RunProofAsync(One(new App.GeometryRelayGame.Step("望前", "AD", 30f, null, 0f))).GetAwaiter().GetResult();
+            Check("G2轉頭-0°有值=望正前:NeckZ 設回 0", Math.Abs(guide3.GetMotor(KebbiMotor.NeckZ) - 0f) < 0.01f);
+
+            // (4) null=不轉頭(向後相容):先撥 99,跑無轉頭步 → NeckZ 仍 99(handler 沒碰)、手臂仍指認
+            var g4 = NewGame(out var guide4, out _);
+            guide4.SetMotor(KebbiMotor.NeckZ, 99f);
+            g4.RunProofAsync(One(new App.GeometryRelayGame.Step("不轉頭", "AD", 30f, null))).GetAwaiter().GetResult();
+            Check("G2轉頭-null 不轉頭(NeckZ 維持 99 未被碰)", Math.Abs(guide4.GetMotor(KebbiMotor.NeckZ) - 99f) < 0.01f);
+            Check("G2轉頭-不轉頭步仍指認手臂(RShoulderY=30)", Math.Abs(guide4.GetMotor(KebbiMotor.RShoulderY) - 30f) < 0.01f);
+
+            // (5) 舊式 4 參數建構式(無 turnHeadToward)→ 預設 null → 不轉頭(完全向後相容)
+            var oldStep = new App.GeometryRelayGame.Step("舊式", "AB,AC", 60f, "已知");
+            Check("G2轉頭-舊式 4 參數 Step:TurnHeadToward 預設 null", oldStep.TurnHeadToward == null);
+
+            // (6) 多步不同角度:-45/0/45 → 末步停在 45、共 3 步
+            var g6 = NewGame(out var guide6, out _);
+            g6.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProofTurnHead()).GetAwaiter().GetResult();
+            Check("G2轉頭-多步:末步 NeckZ 停在 45、共 3 步",
+                Math.Abs(guide6.GetMotor(KebbiMotor.NeckZ) - 45f) < 0.01f && g6.StepsDone == 3);
+
+            // (7) 可重入:同實例第二次跑轉頭題 → StepsDone 重置 3(非累加 6)、末步角度仍 45
+            g6.RunProofAsync(App.GeometryRelayGame.MakeIsoscelesProofTurnHead()).GetAwaiter().GetResult();
+            Check("G2轉頭-可重入:第二次 StepsDone 重置 3、末步 NeckZ=45",
+                g6.StepsDone == 3 && Math.Abs(guide6.GetMotor(KebbiMotor.NeckZ) - 45f) < 0.01f);
         }
 
         // G2 證明題庫:多題型(等腰底角/內角和/外角定理)可換題,每題皆學習單版;逐題驗跑完 3 步、甲機末步指向角。

@@ -34,8 +34,9 @@ namespace KebbiBrain.App
             public string Edge;     // 例「AB,AC」
             public float ArmAngle;  // 手臂指向角度
             public string Layer;    // 學習單邏輯層次:已知/因為/所以(null=該步不出學習單題,維持舊行為)
-            public Step(string reason, string edge, float armAngle, string layer = null)
-            { Reason = reason; Edge = edge; ArmAngle = armAngle; Layer = layer; }
+            public float? TurnHeadToward;  // 甲機轉頭(NeckZ)望向發言者/被討論圖素的角度;null=不轉頭(向後相容)。可為負(望左)
+            public Step(string reason, string edge, float armAngle, string layer = null, float? turnHeadToward = null)
+            { Reason = reason; Edge = edge; ArmAngle = armAngle; Layer = layer; TurnHeadToward = turnHeadToward; }
         }
 
         // doneTimeoutMs：等甲機回 DONE 的上限(過了算甲機離線/卡住 → 降級)。
@@ -55,6 +56,12 @@ namespace KebbiBrain.App
                 float angle = float.Parse(p[2], CultureInfo.InvariantCulture);
                 _guide.Move(0.1f);        // 走向地面大圖該邊(H201 不動;輪式會走;開迴路)
                 _guide.StopWheels();
+                if (p.Length >= 4 && !string.IsNullOrEmpty(p[3]))  // 可選:先轉頭(NeckZ)望向發言者/該圖素,再手臂指認
+                {
+                    float head = float.Parse(p[3], CultureInfo.InvariantCulture);
+                    _guide.SetMotor(KebbiMotor.NeckZ, head);
+                    _log("   👀 甲機 轉頭望向發言者 (" + head.ToString("0.0", CultureInfo.InvariantCulture) + "°)");
+                }
                 _guide.SetMotor(KebbiMotor.RShoulderY, angle); // 手臂指認
                 _log("   👉 甲機 走到並指向 " + edge);
                 _guideLink.SendAsync(from, "DONE|" + edge);
@@ -84,7 +91,8 @@ namespace KebbiBrain.App
 
                 // 鐵則:先註冊 DONE 等待者,再送 POINT(Sim 同步遞送下 DONE 會在 SendAsync 當下就回,先送會漏接)。
                 var doneTask = _awaiter.WaitForAsync((f, t) => t == "DONE|" + s.Edge, _doneTimeoutMs);
-                await _reasonerLink.SendAsync(_guideLink.RobotId, "POINT|" + s.Edge + "|" + s.ArmAngle.ToString(CultureInfo.InvariantCulture));
+                await _reasonerLink.SendAsync(_guideLink.RobotId, "POINT|" + s.Edge + "|" + s.ArmAngle.ToString(CultureInfo.InvariantCulture)
+                    + "|" + (s.TurnHeadToward.HasValue ? s.TurnHeadToward.Value.ToString(CultureInfo.InvariantCulture) : ""));
                 if (await doneTask != null)
                 {
                     StepsDone++;
@@ -135,6 +143,18 @@ namespace KebbiBrain.App
                 new Step("因為 AB = AC（已知，等腰三角形）", "AB,AC", 60f, "已知"),
                 new Step("作頂角平分線 AD，∠BAD = ∠CAD", "AD", 30f, "因為"),
                 new Step("所以 △ABD ≅ △ACD（SAS），得 ∠B = ∠C", "△ABD,△ACD", 80f, "所以"),
+            };
+        }
+
+        // 轉頭版:每步甲機先轉頭(NeckZ)望向發言者/被討論的圖素,再手臂指認(示範「視線跟隨」)。
+        // TurnHeadToward 可為負(望左):-45°望左、0°望前、+45°望右。
+        public static List<Step> MakeIsoscelesProofTurnHead()
+        {
+            return new List<Step>
+            {
+                new Step("因為 AB = AC（已知，等腰三角形）", "AB,AC", 60f, "已知", -45f),       // 望向左側 AB/AC
+                new Step("作頂角平分線 AD，∠BAD = ∠CAD", "AD", 30f, "因為", 0f),              // 望向正前方 AD
+                new Step("所以 △ABD ≅ △ACD（SAS），得 ∠B = ∠C", "△ABD,△ACD", 80f, "所以", 45f), // 望向右側兩底角
             };
         }
 
