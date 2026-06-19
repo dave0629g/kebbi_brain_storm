@@ -84,7 +84,7 @@ namespace KebbiBrain.App
         private async Task SpeakMyTurnAsync()
         {
             string user = _history.Count == 0
-                ? "Mulai percakapan dengan sapaan ramah."
+                ? _me.OpeningUser()
                 : string.Join("\n", _history) + $"\n{_me.Name}:";
             string line;
             try { line = Clean(await _llm.AskAsync(_me.SystemPrompt(), user)); }

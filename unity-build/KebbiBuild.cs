@@ -59,6 +59,8 @@ public static class KebbiBuild
         if (!string.IsNullOrEmpty(pn)) kab.personaName = pn;
         var pc = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_CHAR");
         if (!string.IsNullOrEmpty(pc)) kab.personaCharacter = pc;
+        var pl = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_LANG"); // id-ID / zh-TW
+        if (!string.IsNullOrEmpty(pl)) kab.personaLang = pl;
         kab.peerName = System.Environment.GetEnvironmentVariable("KEBBI_PEER_NAME") ?? "";
         kab.converseStarter = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_STARTER") ?? "") == "1";
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)

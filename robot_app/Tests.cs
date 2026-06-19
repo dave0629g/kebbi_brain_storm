@@ -29,6 +29,7 @@ namespace KebbiBrain
             T_PeerRegistry();
             T_Conversation();
             T_ConversationStt();
+            T_PersonaLang();
             T_RemoteBody();
             T_RemoteVoice();
             T_RemoteVoiceDone();
@@ -284,6 +285,17 @@ namespace KebbiBrain
             Check("協定-廣播→收", RobotLinkProtocol.ShouldDeliver("A", RobotLinkProtocol.All, "B"));
             Check("協定-非給我→丟", !RobotLinkProtocol.ShouldDeliver("A", "C", "B"));
             Check("協定-自己廣播回來→丟", !RobotLinkProtocol.ShouldDeliver("B", RobotLinkProtocol.All, "B"));
+        }
+
+        private static void T_PersonaLang()
+        {
+            var id = new App.ConversationGame.Persona { Name = "Andi", Character = "ramah.", Lang = "id-ID" };
+            var zh = new App.ConversationGame.Persona { Name = "小明", Character = "開朗。", Lang = "zh-TW" };
+            Check("Persona-印尼語 system 鎖 Bahasa Indonesia", id.SystemPrompt().Contains("Bahasa Indonesia"));
+            Check("Persona-中文 system 鎖繁體中文", zh.SystemPrompt().Contains("繁體中文"));
+            Check("Persona-中文 system 帶角色名", zh.SystemPrompt().Contains("小明"));
+            Check("Persona-印尼語開場為印尼語", id.OpeningUser().Contains("percakapan"));
+            Check("Persona-中文開場為中文", zh.OpeningUser().Contains("對話"));
         }
 
         private static void T_ConversationStt()

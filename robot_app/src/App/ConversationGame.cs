@@ -18,14 +18,18 @@ namespace KebbiBrain.App
     {
         public sealed class Persona
         {
-            public string Name;       // 角色名(會出現在對話與 TTS,如 "Andi")
-            public string Character;   // 人格描述(印尼語或中文皆可,餵進 LLM system)
-            public string Lang = "id-ID";
-            // 給 LLM 的 system:鎖印尼語、單句、保持人格、別複讀對方。
+            public string Name;       // 角色名(會出現在對話與 TTS,如 "Andi"/"小明")
+            public string Character;   // 人格描述(該語言或中文皆可,餵進 LLM system)
+            public string Lang = "id-ID"; // "id-ID"=印尼語、"zh-TW"=台灣中文(TTS 走 Config.VoiceForLang)
+            private bool Zh => (Lang ?? "").StartsWith("zh");
+            // 給 LLM 的 system:鎖語言、單句、保持人格、別複讀對方。依 Lang 切換印尼語/台灣中文。
             public string SystemPrompt()
-                => $"Kamu adalah {Name}. {Character} " +
-                   "Bicaralah HANYA dalam Bahasa Indonesia, satu kalimat singkat, natural, tetap dalam karakter. " +
-                   "Tanggapi lawan bicara; jangan mengulang kata-katanya.";
+                => Zh
+                ? $"你是{Name}。{Character} 只用「繁體中文(台灣用語)」說話,每次只回一句、簡短自然、保持你的人格。回應對方的話,不要複述他說過的。"
+                : $"Kamu adalah {Name}. {Character} Bicaralah HANYA dalam Bahasa Indonesia, satu kalimat singkat, natural, tetap dalam karakter. Tanggapi lawan bicara; jangan mengulang kata-katanya.";
+            // 開場(對話歷史為空時)的 user 提示。
+            public string OpeningUser()
+                => Zh ? "用友善的招呼開始這段對話。" : "Mulai percakapan dengan sapaan ramah.";
         }
 
         public const string Pfx = "CV";
@@ -88,7 +92,7 @@ namespace KebbiBrain.App
         private async Task SpeakMyTurnAsync()
         {
             string user = _history.Count == 0
-                ? "Mulai percakapan dengan sapaan ramah."
+                ? _me.OpeningUser()
                 : string.Join("\n", _history) + $"\n{_me.Name}:";
             string line;
             try { line = Clean(await _llm.AskAsync(_me.SystemPrompt(), user)); }

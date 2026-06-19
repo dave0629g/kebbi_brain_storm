@@ -37,9 +37,10 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     public string peerIp = "";              // 對方 IP(逗號分隔多台)。WiFi AP 丟廣播時靠 unicast 直連;空=純廣播
     public float pingIntervalSec = 2f;       // LinkPingTest 用
 
-    [Header("Converse 對話模式(兩台印尼語對話)")]
+    [Header("Converse 對話模式(兩台對話)")]
     public string personaName = "Andi";                 // 本機角色名
     public string personaCharacter = "periang dan ramah."; // 本機人格描述(餵 LLM)
+    public string personaLang = "id-ID";                // 對話語言:id-ID 印尼語 / zh-TW 台灣中文
     public string peerName = "";                        // 對方角色名(顯示用;空=用 peerRobotId)
     public bool converseStarter = false;                // true=本機先開口
 
@@ -182,7 +183,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
-        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = "id-ID" };
+        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = personaLang };
         var game = new ConversationGame(ctx.Voice, ctx.Llm, realLink, me, peerRobotId,
                                         string.IsNullOrEmpty(peerName) ? peerRobotId : peerName, Debug.Log);
         Debug.Log("[Converse] " + personaName + "(" + robotId + ")↔" + peerRobotId +
@@ -195,7 +196,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     private async Task RunConverseSttAsync()
     {
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
-        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = "id-ID" };
+        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = personaLang };
         var game = new ConversationSttGame(ctx.Voice, ctx.Llm, me,
                                            string.IsNullOrEmpty(peerName) ? "對方" : peerName, Debug.Log);
         Debug.Log("[ConverseStt] " + personaName + " 用麥克風聽對方+STT 對話," +
