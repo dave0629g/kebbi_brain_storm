@@ -224,10 +224,13 @@ namespace KebbiBrain.App
         {
             var body = proSide ? _proBody : _defBody;
             var voice = proSide ? _proVoice : _defVoice;
-            float faced = KebbiHead.TurnToward(body, doaDeg, out bool reachable);
-            if (!reachable) _log("   ⚠ 學生在 " + doaDeg.ToString("0.0") + "°，頭只能轉到 " + faced.ToString("0.0") + "°");
+            var r = KebbiHead.FaceFully(body, doaDeg);   // 輪式:底盤轉粗方向+頭補細→完整面向;H201桌上型:頭部部分面向
+            if (r.FullyFaced && r.BaseTurnDeg != 0f)
+                _log("   ↪️ 底盤轉 " + r.BaseTurnDeg.ToString("0") + "° + 頭 " + r.HeadDeg.ToString("0") + "° → 完整面向學生");
+            else if (!r.FullyFaced)
+                _log("   ⚠ 學生在 " + doaDeg.ToString("0.0") + "°，無底盤、頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
             await voice.SpeakAsync("請這位同學出示證據。", "zh-TW");
-            return reachable;
+            return r.FullyFaced;
         }
 
         // 範例：伽利略宗教審判（2 回合）

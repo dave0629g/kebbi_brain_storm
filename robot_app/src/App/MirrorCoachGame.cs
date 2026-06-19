@@ -198,16 +198,18 @@ namespace KebbiBrain.App
             await _ctx.Voice.SpeakAsync("今天的體育課到這裡，做得很好！", "zh-TW");
         }
 
-        // 學生喊「太快了」：讀 DOA → 轉頭面向他 → 降 BPM。回傳是否能完整面向。
+        // 學生喊「太快了」：讀 DOA → 面向他(FaceFully:輪式底盤+頭、H201頭部部分) → 降 BPM。回傳是否完整面向。
         public async Task<bool> HandleTooFastAsync(float doaDeg)
         {
-            float faced = KebbiHead.TurnToward(_ctx.Body, doaDeg, out bool reachable);
+            var r = KebbiHead.FaceFully(_ctx.Body, doaDeg);
             Bpm = Math.Max(30, Bpm - 15);
-            if (!reachable)
-                _ctx.Log("   ⚠ 發問者在 " + doaDeg.ToString("0.0") + "°，超出頭部可達，只能轉到 " + faced.ToString("0.0") + "°");
+            if (r.FullyFaced && r.BaseTurnDeg != 0f)
+                _ctx.Log("   ↪️ 底盤轉 " + r.BaseTurnDeg.ToString("0") + "° + 頭 " + r.HeadDeg.ToString("0") + "° 面向發問者");
+            else if (!r.FullyFaced)
+                _ctx.Log("   ⚠ 發問者在 " + doaDeg.ToString("0.0") + "°，無底盤、頭只能轉到 " + r.HeadDeg.ToString("0.0") + "°（部分面向）");
             await _ctx.Voice.SpeakAsync("好，我們放慢一點。", "zh-TW");
             _ctx.Log("   🐢 BPM 降到 " + Bpm);
-            return reachable;
+            return r.FullyFaced;
         }
 
         public void PrintSummary()

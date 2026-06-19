@@ -61,8 +61,8 @@ namespace KebbiBrain.App
             float doa = _ctx.Body.ReadDoaDegrees();
             Dir actual = Direction.FromAngle(doa);
 
-            // 轉頭面向說話者（workaround：讀 DOA → 自寫 NeckZ，非 turnToDOA）
-            float faced = KebbiHead.TurnToward(_ctx.Body, doa, out bool reachable);
+            // 面向說話者：FaceFully（輪式=底盤轉粗方向+頭補細→完整面向；H201桌上型=頭部部分面向）
+            var ff = KebbiHead.FaceFully(_ctx.Body, doa);
 
             var r = new RoundResult
             {
@@ -71,12 +71,12 @@ namespace KebbiBrain.App
                 Asked = asked,
                 LanguageCorrect = (claimed.HasValue && claimed.Value == actual),
                 RightResponder = (actual == asked),
-                Faced = reachable,
-                FacedAngle = faced
+                Faced = ff.FullyFaced,
+                FacedAngle = ff.FacedAngle
             };
 
-            if (!reachable)
-                _ctx.Log($"   ⚠ 說話者在 {doa:0.0}°（{Direction.ToZh(actual)}），超出頭部可達範圍，只能轉到 {faced:0.0}°（正後方頭轉不過去）");
+            if (!ff.FullyFaced)
+                _ctx.Log($"   ⚠ 說話者在 {doa:0.0}°（{Direction.ToZh(actual)}），{(_ctx.Body.CanMove ? "" : "無底盤、")}只能面向到 {ff.FacedAngle:0.0}°（部分面向）");
 
             if (r.LanguageCorrect && r.RightResponder)
             {
@@ -106,7 +106,7 @@ namespace KebbiBrain.App
         public async Task<RoundResult> ReverseRoundAsync(Student target)
         {
             Rounds++;
-            KebbiHead.TurnToward(_ctx.Body, target.AngleDeg, out bool reachable);
+            var ff = KebbiHead.FaceFully(_ctx.Body, target.AngleDeg);
             await _ctx.Voice.SpeakAsync("Kamu di mana? (Saya di ...)", "id-ID");
 
             string spoken = await _ctx.Voice.ListenAsync("id-ID");
@@ -118,7 +118,7 @@ namespace KebbiBrain.App
                 Asked = target.Dir,
                 LanguageCorrect = (claimed.HasValue && claimed.Value == target.Dir),
                 RightResponder = true,
-                Faced = reachable
+                Faced = ff.FullyFaced
             };
             if (r.LanguageCorrect) { Score++; await _ctx.Voice.SpeakAsync("Benar!", "id-ID"); }
             else await _ctx.Voice.SpeakAsync($"Salah. Kamu di {Direction.ToIndo(target.Dir)}.", "id-ID");
@@ -209,7 +209,7 @@ namespace KebbiBrain.App
 
             float doa = _ctx.Body.ReadDoaDegrees();      // B 此刻出聲 → 真值
             Dir actual = Direction.FromAngle(doa);
-            float faced = KebbiHead.TurnToward(_ctx.Body, doa, out bool reachable);
+            var ff = KebbiHead.FaceFully(_ctx.Body, doa);   // 面向 B(輪式底盤+頭、H201頭部部分)
 
             bool correct = claimed.HasValue && claimed.Value == actual;
             if (correct)
@@ -232,8 +232,8 @@ namespace KebbiBrain.App
                 ClaimedFromAsker = null,
                 PerspectiveSector = actual,
                 Correct = correct,
-                Faced = reachable,
-                FacedAngle = faced
+                Faced = ff.FullyFaced,
+                FacedAngle = ff.FacedAngle
             };
         }
 
@@ -260,11 +260,8 @@ namespace KebbiBrain.App
             Dir? claimedKebbi = Direction.ParseIndo(spokenKebbi);
             Dir? claimedAsker = Direction.ParseIndo(spokenAsker);
 
-            // 轉頭面向 B（具身回饋；真值用校準時的座位方位）。
-            bool reach;
-            float faced = target != null
-                ? KebbiHead.TurnToward(_ctx.Body, target.AngleDeg, out reach)
-                : KebbiHead.TurnToward(_ctx.Body, 0f, out reach);
+            // 面向 B（具身回饋；真值用校準時的座位方位）。FaceFully:輪式底盤+頭、H201頭部部分。
+            var ff = KebbiHead.FaceFully(_ctx.Body, target != null ? target.AngleDeg : 0f);
 
             bool kebbiOk = claimedKebbi.HasValue && claimedKebbi.Value == fromKebbi;
             bool askerOk = claimedAsker.HasValue && claimedAsker.Value == fromAsker;
@@ -290,8 +287,8 @@ namespace KebbiBrain.App
                 ClaimedFromAsker = claimedAsker,
                 PerspectiveSector = fromAsker,
                 Correct = correct,
-                Faced = reach,
-                FacedAngle = faced
+                Faced = ff.FullyFaced,
+                FacedAngle = ff.FacedAngle
             };
         }
 
