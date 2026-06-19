@@ -106,5 +106,22 @@ namespace KebbiBrain.App
         // 反例:A 只走 1 格(沒到交接點)就 HANDOFF → 交棒失敗(B 不啟動),最後 GOAL 因沒交棒而失敗。
         public static List<string> Level2HandoffTooEarlyProgram() =>
             new List<string> { "FWD", "HANDOFF", "FWD", "GOAL" };
+
+        // ── 關卡3(難度↑↑:多障礙 S 形強制路徑 + 交接點 H)──
+        //   S . . .       上排往右會走到死路((1,3)=#);唯一路是先下、橫越中排到 H、再下到 G。
+        //   . # # #
+        //   . . . H       交接點 H(2,3)
+        //   # # # .
+        //   . . . G
+        public static LevelMap Level3() => new LevelMap(new[] { "S...", ".###", "...H", "###.", "...G" });
+
+        // 正解:下→橫越→到 H 交棒→下到 G(7 步,即最短)。
+        public static List<string> Level3DetourProgram() =>
+            new List<string> { "RIGHT", "FWD", "FWD", "LEFT", "FWD", "FWD", "FWD",
+                               "HANDOFF", "RIGHT", "FWD", "FWD", "GOAL" };
+
+        // 反例:沿上排直直往右,想下卻撞牆((1,3)=#)→ 闖關失敗。
+        public static List<string> Level3CrashProgram() =>
+            new List<string> { "FWD", "FWD", "FWD", "RIGHT", "FWD", "GOAL" };
     }
 }

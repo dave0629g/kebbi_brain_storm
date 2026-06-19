@@ -46,6 +46,7 @@ namespace KebbiBrain
             T_G1_Score();
             T_G1_Handoff();
             T_G1_HandoffSync();
+            T_G1_Level3();
             T_Finale();
             T_G5_Trial();
             T_G4_Judge();
@@ -830,6 +831,42 @@ namespace KebbiBrain
             reuse.RunProgramAsync(App.LevelMap.Level2HandoffTooEarlyProgram()).GetAwaiter().GetResult();
             reuse.RunProgramAsync(App.LevelMap.Level2DetourProgram()).GetAwaiter().GetResult();
             Check("G1交接點-可重入:第二次正解 HandoffFailed 歸零、抵達", !reuse.HandoffFailed && reuse.ReachedGoal);
+        }
+
+        // G1 多障礙避障關(Level3):S 形強制路徑 + 交接點 H。撞版沿上排撞 #(1,3)失敗;正解下繞→過 H→到 G。
+        // 演手冊命脈「改指令→物理結果改變」放大到多障礙:錯一步就撞牆,唯一最短路才 3 星。純 Sim 可驗。
+        private static void T_G1_Level3()
+        {
+            Action<string> noop = _ => { };
+            var map = App.LevelMap.Level3();
+            Check("G1-Level3 有交接點 H(2,3)", map.HasHandoffPoint && map.IsHandoffPoint(2, 3));
+            Check("G1-Level3 最短路徑=7(BFS,S 形繞行)", map.ShortestSteps() == 7);
+            RelayQuestGame NewGame()
+            {
+                var bus = new SimRobotBus(noop);
+                return new App.RelayQuestGame(new SimKebbiBody(noop, true), bus.CreateLink("A機"),
+                    new SimKebbiBody(noop, true), bus.CreateLink("B機"), noop, map);
+            }
+
+            // 撞牆版:沿上排走到底再右轉下行 → 撞 #(1,3) → Crashed、未抵達、撞前走 3 格
+            var gCrash = NewGame();
+            gCrash.RunProgramAsync(App.LevelMap.Level3CrashProgram()).GetAwaiter().GetResult();
+            Check("G1-Level3 撞牆版:Crashed=true、未抵達、撞前走 3 格",
+                gCrash.Crashed && !gCrash.ReachedGoal && gCrash.Steps == 3);
+
+            // 正解版:下→橫越→站對 H 交棒→下到 G → 抵達、沒撞、無交棒失敗、走 7 格(==最短)、3 星
+            var gOk = NewGame();
+            gOk.RunProgramAsync(App.LevelMap.Level3DetourProgram()).GetAwaiter().GetResult();
+            Check("G1-Level3 正解:抵達且沒撞且交棒成功",
+                gOk.ReachedGoal && !gOk.Crashed && gOk.OnRobotB && !gOk.HandoffFailed);
+            Check("G1-Level3 正解:走 7 格(==最短)、效率 3 星", gOk.Steps == 7 && gOk.Stars == 3);
+
+            // 可重入:同實例先撞牆後正解 → 第二次抵達、Crashed 歸零、走 7 格
+            var gReuse = NewGame();
+            gReuse.RunProgramAsync(App.LevelMap.Level3CrashProgram()).GetAwaiter().GetResult();
+            gReuse.RunProgramAsync(App.LevelMap.Level3DetourProgram()).GetAwaiter().GetResult();
+            Check("G1-Level3 可重入:第二次正解抵達、Crashed 歸零、走 7 格",
+                gReuse.ReachedGoal && !gReuse.Crashed && gReuse.Steps == 7);
         }
 
         private static void T_G1_RelayQuest()

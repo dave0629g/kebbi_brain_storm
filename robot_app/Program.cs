@@ -200,7 +200,28 @@ namespace KebbiBrain
             await s.RunProgramAsync(LevelMap.Level2DetourProgram());
             log("→ 交棒失敗=" + s.HandoffFailed + "、抵達=" + s.ReachedGoal + " 🎉");
 
-            log("\n=== 重點：撞牆失敗vs繞行成功、效率星等結算、交接點同步(站對才交棒)、交棒換你語音+舉手手勢 ===");
+            // 關卡3(多障礙 S 形強制路徑 + 交接點 H):錯一步就撞牆,唯一最短路才 3 星。
+            var map3 = LevelMap.Level3();
+            RelayQuestGame NewGame3()
+            {
+                var bus = new SimRobotBus(log);
+                return new RelayQuestGame(new SimKebbiBody(log, true), bus.CreateLink("Kebbi-A"),
+                    new SimKebbiBody(log, true), bus.CreateLink("Kebbi-B"), log, map3,
+                    new SimVoice(log), new SimVoice(log));
+            }
+            log("\n【關卡3 ▶ 多障礙 S 形強制路徑(障礙更密，只有一條最短路)】");
+            log(map3.Render(map3.StartR, map3.StartC, 'A'));
+            log("— 反例：沿上排直直走到底再右轉下行 → 撞 # —");
+            var c3 = NewGame3();
+            await c3.RunProgramAsync(LevelMap.Level3CrashProgram());
+            log("→ 撞牆=" + c3.Crashed + "、抵達=" + c3.ReachedGoal + "（上排是死路，要先往下繞）");
+            log("— 正解：下繞 → 橫越中排到 H 交棒 → 下到 G(7 步即最短) —");
+            var d3 = NewGame3();
+            await d3.RunProgramAsync(LevelMap.Level3DetourProgram());
+            log("→ 走 " + d3.Steps + " 格、抵達=" + d3.ReachedGoal + "、交棒成功=" + d3.OnRobotB + " 🎉");
+            d3.PrintSummary();
+
+            log("\n=== 重點：撞牆失敗vs繞行成功、效率星等結算、交接點同步(站對才交棒)、交棒換你語音+舉手手勢、多障礙 S 形關 ===");
             log("====================================================");
         }
 
