@@ -41,6 +41,8 @@ namespace KebbiBrain
 
             if (Array.IndexOf(args, "--g4e") >= 0) { await PlayG4EightWayDemoAsync(); return 0; }
 
+            if (Array.IndexOf(args, "--face") >= 0) { PlayFaceDemo(); return 0; }
+
             if (Array.IndexOf(args, "--g3r") >= 0) { await PlayG3RewindDemoAsync(); return 0; }
 
             if (Array.IndexOf(args, "--g3f") >= 0) { await PlayG3FrameDemoAsync(); return 0; }
@@ -79,6 +81,7 @@ namespace KebbiBrain
             Console.WriteLine("  --g5t             G5 七步審判驅動器 + 學生席舉手插話分支");
             Console.WriteLine("  --g4t             G4 裁判賽多輪排名（視角轉換 + 聲源核對）");
             Console.WriteLine("  --g4e             G4 八向方位（含斜向 serong）+ NeckZ 可達性決定實際面向扇區");
+            Console.WriteLine("  --face            複合面向 FaceFully（底盤 turn 轉粗方向 + NeckZ±40 補細，連正後也能完整面向）");
             Console.WriteLine("  --g3r             G3 鏡像教練:逐幀回退(喊「再一次」回退一幀重示範,手冊 step4)");
             Console.WriteLine("  --g3f             G3 動作幀資料化:單幀自訂停留 HoldMs + 整組循環 Move.Loops");
             Console.WriteLine("  --g2v             G2 學生自編腳本驗證(結構把關:缺步/層次錯置→才放行接力)");
@@ -675,6 +678,35 @@ namespace KebbiBrain
                 + (reachable ? "可達" : "不可達") + "）→ 實際面向最近可達扇區：" + Direction.ToZh(reached) + " / " + Direction.ToIndo(reached));
 
             log("\n=== 重點：方位從 4 向細到 8 向(serong 斜向)、印尼語複合詞解析、NeckZ 物理可達性(實機 ±40)決定『實際面向扇區』(正後方只能降級到右前 serong) ===");
+            log("====================================================");
+        }
+
+        // 複合面向 FaceFully Demo（純 Sim）——NeckZ 實機僅 ±40，頭單獨轉不到側邊/正後；
+        // 輪式 Kebbi 用底盤 turn() 補粗方向 + NeckZ 補細 → 連正後方學生也能完整面向（多致動器協調）。
+        // 對照 H201 桌上型（無底盤）只能頭部部分面向。
+        private static void PlayFaceDemo()
+        {
+            Action<string> log = Console.WriteLine;
+            log("========== 複合面向 FaceFully Demo（底盤轉向 + 頭部微調）==========");
+            log("（NeckZ 實機只有 ±40 → 頭單獨轉不到側邊/正後；輪式 Kebbi 用底盤 turn() 補粗方向 → 完整面向）\n");
+
+            var wheeled = new SimKebbiBody(log, canMove: true);
+            foreach (var doa in new[] { 30f, 90f, 180f, -120f })
+            {
+                log("【輪式 Kebbi 面向 " + doa.ToString("0") + "° 的學生】");
+                var r = KebbiHead.FaceFully(wheeled, doa);
+                log("→ 底盤轉 " + r.BaseTurnDeg.ToString("0") + "° + 頭 NeckZ " + r.HeadDeg.ToString("0")
+                    + "° = 面向 " + r.FacedAngle.ToString("0") + "°（" + (r.FullyFaced ? "完整面向 ✔" : "部分面向") + "）\n");
+            }
+
+            log("【對照：H201 桌上型（無底盤）面向 90° 的學生】");
+            var desktop = new SimKebbiBody(log, canMove: false);
+            var rd = KebbiHead.FaceFully(desktop, 90f);
+            log("→ 底盤不能轉、頭只能到 " + rd.HeadDeg.ToString("0") + "° → "
+                + (rd.FullyFaced ? "完整面向" : "只能部分面向（頭轉不到 90°）") + "\n");
+
+            log("=== 重點：NeckZ ±40 不夠面向側邊時，輪式 Kebbi 用底盤 turn() 補粗方向、頭補細 → 連正後方學生也能完整面向（多致動器協調）；桌上型則誠實部分面向 ===");
+            log("（實機：底盤 turn() 受授權牆/必測③ 影響；被擋則退回頭部部分面向）");
             log("====================================================");
         }
 

@@ -33,6 +33,7 @@ namespace KebbiBrain
             T_NuwaMotorIds();
             T_Direction_Edges();
             T_HeadClamp_Edges();
+            T_FaceFully();
             T_BodyCommand_Edges();
             T_G2_GeometryRelay();
             T_G2_Degrade();
@@ -600,6 +601,53 @@ namespace KebbiBrain
             float f6 = KebbiHead.TurnToward(body, 200f, out bool r6); // 正規化→-160→夾 -40
             Check("200°(正規化-160)→夾 -40、不可達", !r6 && Math.Abs(f6 + 40f) < 0.01f);
             Check("TurnToward 有寫入 NeckZ", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) + 40f) < 0.01f);
+        }
+
+        // 複合面向 FaceFully：底盤 turn() 轉粗方向 + NeckZ(±40)補細。輪式可完整面向任意角(含正後);
+        // H201 桌上型不能轉底盤 → >±40 只能部分面向(等同 TurnToward 降級)。純 Sim 可驗(底盤開迴路,只驗角度分配)。
+        private static void T_FaceFully()
+        {
+            Action<string> noop = _ => { };
+            var wheeled = new SimKebbiBody(noop, canMove: true);   // 輪式,NeckZ ±40
+            var desktop = new SimKebbiBody(noop, canMove: false);  // H201 桌上型(無底盤)
+
+            // 輪式:範圍內(30°)只動頭、不動底盤、完整面向
+            var r1 = KebbiHead.FaceFully(wheeled, 30f);
+            Check("FaceFully-輪式 30°(範圍內):不動底盤、頭=30、完整面向、有寫 NeckZ",
+                r1.BaseTurnDeg == 0f && Math.Abs(r1.HeadDeg - 30f) < 0.01f && r1.FullyFaced
+                && Math.Abs(wheeled.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.01f);
+
+            // 輪式:90°(超出±40)→底盤轉50+頭40=合成90、完整面向
+            var r2 = KebbiHead.FaceFully(wheeled, 90f);
+            Check("FaceFully-輪式 90°:底盤50+頭40=合成90、完整面向",
+                Math.Abs(r2.BaseTurnDeg - 50f) < 0.01f && Math.Abs(r2.HeadDeg - 40f) < 0.01f
+                && Math.Abs(r2.FacedAngle - 90f) < 0.01f && r2.FullyFaced);
+
+            // 輪式:-90°→底盤-50+頭-40、完整面向
+            var r3 = KebbiHead.FaceFully(wheeled, -90f);
+            Check("FaceFully-輪式 -90°:底盤-50+頭-40、完整面向",
+                Math.Abs(r3.BaseTurnDeg + 50f) < 0.01f && Math.Abs(r3.HeadDeg + 40f) < 0.01f && r3.FullyFaced);
+
+            // 輪式:正後 180°→底盤140+頭40=180、完整面向(連正後也能)
+            var r4 = KebbiHead.FaceFully(wheeled, 180f);
+            Check("FaceFully-輪式 180°正後:底盤140+頭40=180、完整面向",
+                Math.Abs(r4.BaseTurnDeg - 140f) < 0.01f && Math.Abs(r4.FacedAngle - 180f) < 0.01f && r4.FullyFaced);
+
+            // 邊界:恰 40°→頭40、不動底盤、完整
+            var r5 = KebbiHead.FaceFully(wheeled, 40f);
+            Check("FaceFully-輪式 邊界40°:頭40、不動底盤、完整面向",
+                r5.BaseTurnDeg == 0f && Math.Abs(r5.HeadDeg - 40f) < 0.01f && r5.FullyFaced);
+
+            // H201 桌上型:90°→底盤不能轉→只頭40、部分面向(FullyFaced=false)
+            var r6 = KebbiHead.FaceFully(desktop, 90f);
+            Check("FaceFully-H201 90°:底盤不轉、頭40、只部分面向(FullyFaced=false)",
+                r6.BaseTurnDeg == 0f && Math.Abs(r6.HeadDeg - 40f) < 0.01f && !r6.FullyFaced);
+
+            // H201 範圍內 30°→頭即可、完整面向、有寫 NeckZ
+            var r7 = KebbiHead.FaceFully(desktop, 30f);
+            Check("FaceFully-H201 30°(範圍內):頭30、完整面向、有寫 NeckZ",
+                r7.BaseTurnDeg == 0f && Math.Abs(r7.HeadDeg - 30f) < 0.01f && r7.FullyFaced
+                && Math.Abs(desktop.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.01f);
         }
 
         // 機身命令邊角:負值(反向)、速度參數保留、Stop、壞/不足命令不丟例外。
