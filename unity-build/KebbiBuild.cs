@@ -24,6 +24,7 @@ public static class KebbiBuild
     public static void BuildMiddlewareApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-middleware-arm64.apk");
     public static void BuildLinkPingApk()   => Build(useRealRobotApi: false, apk: "Build/kebbi-linkping-arm64.apk", mode: KebbiAppBehaviour.Mode.LinkPingTest);
     public static void BuildG1DirectorApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-g1director-arm64.apk", mode: KebbiAppBehaviour.Mode.G1Director);
+    public static void BuildControlledApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-controlled-arm64.apk", mode: KebbiAppBehaviour.Mode.Controlled);
 
     private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
     {
