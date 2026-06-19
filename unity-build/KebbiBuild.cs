@@ -47,6 +47,7 @@ public static class KebbiBuild
         var kab = go.AddComponent<KebbiAppBehaviour>();
         kab.useRealRobotApi = useRealRobotApi; // false → 一般 Android 當模擬器測 middleware(body=SimKebbiBody)
         kab.mode = mode;                       // LinkPingTest=驗 UDP 廣播;預設 G4_TebakArah
+        kab.peerIp = System.Environment.GetEnvironmentVariable("KEBBI_PEER_IP") ?? ""; // 對方 IP:WiFi 丟廣播時靠 unicast 直連(非機密,可空)
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
         EditorSceneManager.SaveScene(scene, scenePath);
 

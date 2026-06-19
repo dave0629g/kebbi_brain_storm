@@ -26,6 +26,7 @@ namespace KebbiBrain
             T_G3_Mirror();
             T_RobotLink();
             T_RobotLinkProtocol();
+            T_PeerRegistry();
             T_RemoteBody();
             T_RemoteVoice();
             T_RemoteVoiceDone();
@@ -281,6 +282,34 @@ namespace KebbiBrain
             Check("協定-廣播→收", RobotLinkProtocol.ShouldDeliver("A", RobotLinkProtocol.All, "B"));
             Check("協定-非給我→丟", !RobotLinkProtocol.ShouldDeliver("A", "C", "B"));
             Check("協定-自己廣播回來→丟", !RobotLinkProtocol.ShouldDeliver("B", RobotLinkProtocol.All, "B"));
+        }
+
+        private static void T_PeerRegistry()
+        {
+            // 靜態設定 + 自動學習都進得去;Snapshot 反映內容
+            var r = new PeerRegistry("192.168.1.108"); // 本機 .108
+            Check("Peer-靜態新增", r.AddStatic("192.168.1.112"));
+            Check("Peer-學習新 IP", r.Learn("192.168.1.120"));
+            Check("Peer-Count=2", r.Count == 2);
+            Check("Peer-Knows 已加入", r.Knows("192.168.1.112") && r.Knows("192.168.1.120"));
+
+            // 去重:同 IP 再加回傳 false、不增量
+            Check("Peer-重複不新增", !r.Learn("192.168.1.112"));
+            Check("Peer-Count 仍=2", r.Count == 2);
+
+            // 排除自己(避免對自己的廣播來源 unicast)
+            Check("Peer-排除本機 IP", !r.Learn("192.168.1.108"));
+
+            // 排除無效/萬用位址、空字串
+            Check("Peer-排除 0.0.0.0", !r.AddStatic("0.0.0.0"));
+            Check("Peer-排除 255 廣播", !r.AddStatic("255.255.255.255"));
+            Check("Peer-排除空字串", !r.AddStatic(""));
+            Check("Peer-排除 null", !r.AddStatic(null));
+            Check("Peer-Count 不受無效影響=2", r.Count == 2);
+
+            // 無 selfIp 時不排除任何真實 IP
+            var r2 = new PeerRegistry();
+            Check("Peer-無 selfIp 仍可加", r2.AddStatic("10.0.0.5") && r2.Count == 1);
         }
 
         // 記錄式機身:給遠端命令測試斷言(SimKebbiBody 的 Move/Turn 只 log,無狀態可驗)。

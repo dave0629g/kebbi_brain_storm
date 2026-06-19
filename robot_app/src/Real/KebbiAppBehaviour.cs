@@ -34,6 +34,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     [Header("多機")]
     public string robotId = "Kebbi-A";      // 每台設不同 ID
     public string peerRobotId = "Kebbi-B";  // G1Director 要驅動的被控機 ID
+    public string peerIp = "";              // 對方 IP(逗號分隔多台)。WiFi AP 丟廣播時靠 unicast 直連;空=純廣播
     public float pingIntervalSec = 2f;       // LinkPingTest 用
 
     private readonly CancellationTokenSource _life = new CancellationTokenSource();
@@ -74,7 +75,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // ── 雙機收送實測(必測④):廣播 ping、印出收到的對方訊息 ──
     private async Task RunLinkPingTestAsync()
     {
-        _link = new UnityRobotLink(robotId);
+        _link = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link.OnMessage((from, text) => Debug.Log("[Link] ✅ 收到 " + from + ": " + text));
         Debug.Log("[Link] 啟動,RobotId=" + robotId + ",每 " + pingIntervalSec + "s 廣播一次 ping。對方收到即代表雙機收送 OK。");
 
@@ -94,7 +95,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // 被控機只需 Mode=Controlled。G2/G5 可比照(換成各自遊戲建構式)。
     private async Task RunG1DirectorAsync()
     {
-        var realLink = new UnityRobotLink(robotId);
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;                       // 交給 OnDestroy 釋放
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
         if (isH201Desktop && ctx.Body is UnityKebbiBody ub) ub.CanMove = false;
@@ -115,7 +116,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // 被控機設 Mode=Controlled(BodyCommandReceiver 收 BC| 動作 + VC| 用自己喇叭說)。G2 比照(換 GeometryRelayGame 建構式)。
     private async Task RunG5DirectorAsync()
     {
-        var realLink = new UnityRobotLink(robotId);
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
         if (isH201Desktop && ctx.Body is UnityKebbiBody ub) ub.CanMove = false;
@@ -137,7 +138,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // 被控機 Mode=Controlled。比照 G1Director/G5Director(遊戲邏輯本機跑、只有遠端機身/語音出網路)。
     private async Task RunG2DirectorAsync()
     {
-        var realLink = new UnityRobotLink(robotId);
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
 
@@ -155,7 +156,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     // ── 多機・被控(Controlled):收到中控的機身命令(BC|…)就動、語音命令(VC|…)就用本機喇叭說;非命令訊息印出 ──
     private void RunControlled()
     {
-        var realLink = new UnityRobotLink(robotId);
+        var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
         // 第 4 引數 ctx.Voice:讓被控機收到 VC|SAY 時用「自己的」喇叭說(G5 辯方/G2 乙機要自己開口)。
@@ -163,6 +164,19 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             (from, t) => Debug.Log("[Controlled] 非命令訊息(" + from + "): " + t),
             ctx.Voice);
         Debug.Log("[Controlled] " + robotId + " 待命:收到中控機身/語音命令即執行(保持 app 在前景)。");
+    }
+
+    // peerIp 欄位("1.2.3.4" 或逗號分隔多台)→ 去空白/空項的陣列;空則回 null(純廣播)。
+    private string[] PeerIps()
+    {
+        if (string.IsNullOrEmpty(peerIp)) return null;
+        var list = new System.Collections.Generic.List<string>();
+        foreach (var part in peerIp.Split(','))
+        {
+            var ip = part.Trim();
+            if (ip.Length > 0) list.Add(ip);
+        }
+        return list.Count > 0 ? list.ToArray() : null;
     }
 
     void OnDestroy()

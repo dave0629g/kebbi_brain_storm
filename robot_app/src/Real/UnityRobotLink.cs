@@ -25,16 +25,22 @@ namespace KebbiBrain.Real
         private readonly int _port;
         private readonly UdpClient _udp;
         private readonly IPEndPoint _broadcast;
+        private readonly PeerRegistry _peers;      // 已知對端 IP(unicast 備援;見 PeerRegistry 說明)
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly SynchronizationContext _main; // 主執行緒(建構時擷取)
         private Action<string, string> _handler;
 
-        public UnityRobotLink(string robotId, int port = DefaultPort)
+        // staticPeers:上線前可填對方 IP(逗號分隔亦可逐個傳),廣播被 AP 丟棄時靠 unicast 仍能通。
+        // selfIp:本機 IP,避免把自己學成 peer。兩者皆可省略(純廣播,行為與舊版相同)。
+        public UnityRobotLink(string robotId, int port = DefaultPort, string[] staticPeers = null, string selfIp = null)
         {
             RobotId = robotId;
             _port = port;
             _main = SynchronizationContext.Current; // 須在 Unity 主緒 new 此物件
             _broadcast = new IPEndPoint(IPAddress.Broadcast, port);
+            _peers = new PeerRegistry(selfIp);
+            if (staticPeers != null)
+                foreach (var ip in staticPeers) _peers.AddStatic(ip);
 
             _udp = new UdpClient();
             _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -52,8 +58,15 @@ namespace KebbiBrain.Real
         private async Task SendFramedAsync(string to, string text)
         {
             byte[] payload = RobotLinkProtocol.Frame(RobotId, to, text);
+            // 1) 照舊廣播(廣播可通的 AP 上免設定即達);失敗不致命,還有 unicast 備援。
             try { await _udp.SendAsync(payload, payload.Length, _broadcast); }
-            catch (Exception e) { Debug.LogWarning("[RobotLink] 送出失敗: " + e.Message); }
+            catch (Exception e) { Debug.LogWarning("[RobotLink] 廣播送出失敗: " + e.Message); }
+            // 2) 對每個已知對端 IP 直接 unicast(廣播被 AP 丟棄時的可靠路徑)。
+            foreach (var ip in _peers.Snapshot())
+            {
+                try { await _udp.SendAsync(payload, payload.Length, new IPEndPoint(IPAddress.Parse(ip), _port)); }
+                catch (Exception e) { Debug.LogWarning("[RobotLink] unicast→" + ip + " 失敗: " + e.Message); }
+            }
         }
 
         private async Task ReceiveLoopAsync()
@@ -68,6 +81,10 @@ namespace KebbiBrain.Real
                 if (!RobotLinkProtocol.TryParse(res.Buffer, res.Buffer.Length, out var from, out var to, out var text))
                     continue;
                 if (!RobotLinkProtocol.ShouldDeliver(from, to, RobotId)) continue; // 自己的/非給我的 → 丟棄
+
+                // 自動學習來源 IP:之後回送改走 unicast,廣播被 AP 丟棄時回覆方向也能通。
+                if (_peers.Learn(res.RemoteEndPoint.Address.ToString()))
+                    Debug.Log("[RobotLink] 學到對端 " + res.RemoteEndPoint.Address);
 
                 if (_main != null) _main.Post(_ => _handler?.Invoke(from, text), null);
                 else _handler?.Invoke(from, text);                    // 無主緒 context 時直接呼叫
