@@ -26,8 +26,10 @@ namespace KebbiBrain.App
 
         public int MyTurns { get; private set; }
         public int MissedListens { get; private set; }   // 聽到空(沒收到/沒聽清)的次數 → 衡量脆弱度
-        public int MaxListenRetries = 4;                  // 一輪最多重聽幾次(各 ~4 秒)
+        public int MinListenRetries = 2;                  // 一輪聽的窗數下限
+        public int MaxListenRetries = 5;                  // 一輪聽的窗數上限(各 ~4 秒)
         public int StarterWarmupMs = 4000;                // starter 先等一下,讓對方先進入「聽」
+        private readonly System.Random _rng = new System.Random();
         public IReadOnlyList<string> History => _history;
 
         public ConversationSttGame(IVoice voice, ILlm llm, ConversationGame.Persona me,
@@ -63,10 +65,12 @@ namespace KebbiBrain.App
             _log?.Invoke($"💬(STT) {_me.Name} 結束(我講 {MyTurns} 句,沒聽到 {MissedListens} 次)");
         }
 
-        // 重聽直到聽到非空,或放棄(回空 → 上層打破沉默)
+        // 重聽直到聽到非空,或放棄(回空 → 上層打破沉默)。
+        // 每輪窗數隨機(MinListenRetries..MaxListenRetries):打破「兩台同步聽說」的相位鎖死。
         private async Task<string> ListenUntilHeardAsync()
         {
-            for (int i = 0; i < MaxListenRetries; i++)
+            int retries = _rng.Next(MinListenRetries, MaxListenRetries + 1);
+            for (int i = 0; i < retries; i++)
             {
                 string t;
                 try { t = (await _voice.ListenAsync(_me.Lang) ?? "").Trim(); }

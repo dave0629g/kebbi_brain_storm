@@ -302,7 +302,7 @@ namespace KebbiBrain
 
             // (2) 聽不到對方(STT 全空)→ 主動打破沉默(自我修正,不卡死)
             var v2 = new RecordingVoice(); // 沒 EnqueueHeard → ListenAsync 一律回 ""
-            var g2 = new App.ConversationSttGame(v2, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0, MaxListenRetries = 3 };
+            var g2 = new App.ConversationSttGame(v2, new SimLlm(noop), me, "Budi") { StarterWarmupMs = 0, MinListenRetries = 3, MaxListenRetries = 3 };
             bool done2 = System.Threading.Tasks.Task.Run(() => g2.RunAsync(starter: false, maxTurns: 1)).Wait(5000);
             Check("STT對話-聽不到也不卡死", done2);
             Check("STT對話-沒聽到→主動開口打破沉默", g2.MyTurns >= 1 && v2.Spoken.Count >= 1);
