@@ -25,7 +25,6 @@ namespace KebbiBrain.Real
         private Texture2D _frame;
         private List<Detection> _dets = new List<Detection>();
         private string _status = "啟動中…";
-        private string _reasoning = "";
         private int _shots, _errors, _lastMs;
         private bool _busy;
         private static Texture2D _px;
@@ -107,7 +106,6 @@ namespace KebbiBrain.Real
                 {
                     string resp = req.downloadHandler.text;
                     _dets = GeminiRoboticsProtocol.ParseDetections(resp);
-                    _reasoning = Trunc(GeminiRoboticsProtocol.ExtractModelText(resp), 180);
                     _shots++;
                     var sb = new StringBuilder();
                     foreach (var d in _dets) sb.Append(d.Label).Append(' ');
@@ -119,13 +117,14 @@ namespace KebbiBrain.Real
             _busy = false;
         }
 
+        // 極簡疊圖:相機 + 綠框 + 物體名稱小標籤(深色底好讀)+ 底部一行小狀態。無任何 log/推理文字。
         private void OnGUI()
         {
             int sw = Screen.width, sh = Screen.height;
             if (_cam != null && _cam.width > 16)
                 GUI.DrawTexture(new Rect(0, 0, sw, sh), _cam, ScaleMode.ScaleToFit, false);
 
-            var lbl = new GUIStyle(GUI.skin.label) { fontSize = Mathf.Max(18, sh / 38), fontStyle = FontStyle.Bold, normal = { textColor = Color.cyan } };
+            int fs = Mathf.Clamp(sh / 36, 20, 40);
             foreach (var d in _dets)
             {
                 if (d.HasBox)
@@ -133,18 +132,38 @@ namespace KebbiBrain.Real
                     float x = d.Xmin / 1000f * sw, y = d.Ymin / 1000f * sh;
                     float w = (d.Xmax - d.Xmin) / 1000f * sw, h = (d.Ymax - d.Ymin) / 1000f * sh;
                     DrawRect(new Rect(x, y, w, h), Color.green, 3);
-                    GUI.Label(new Rect(x + 3, y + 1, sw, 48), d.Label, lbl);
+                    DrawTag(d.Label, x, y, fs);
                 }
                 else if (d.HasPoint)
                 {
                     float x = d.X / 1000f * sw, y = d.Y / 1000f * sh;
                     DrawRect(new Rect(x - 13, y - 13, 26, 26), Color.green, 3);
-                    GUI.Label(new Rect(x + 16, y - 16, sw, 48), d.Label, lbl);
+                    DrawTag(d.Label, x + 16, y - fs - 6, fs);
                 }
             }
 
-            var s2 = new GUIStyle(GUI.skin.label) { fontSize = Mathf.Max(16, sh / 50), normal = { textColor = Color.yellow }, wordWrap = true };
-            GUI.Label(new Rect(12, 12, sw - 24, 140), "[Robotics-ER 視覺] " + _status + (_errors > 0 ? "  (err " + _errors + ")" : "") + "\n" + _reasoning, s2);
+            // 底部一行小狀態(深色半透明底);出錯才顯紅。
+            int ss = Mathf.Clamp(sh / 64, 14, 26);
+            var st = new GUIStyle(GUI.skin.label) { fontSize = ss, normal = { textColor = _errors > 0 ? new Color(1f, .5f, .5f) : Color.white } };
+            Fill(new Rect(0, sh - ss - 14, sw, ss + 14), new Color(0, 0, 0, 0.5f));
+            GUI.Label(new Rect(12, sh - ss - 9, sw - 24, ss + 8), _status, st);
+        }
+
+        // 物體名稱小標籤:深色半透明底 + 白字,疊在框左上角,好讀又不佔畫面。
+        private static void DrawTag(string text, float x, float y, int fs)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var style = new GUIStyle(GUI.skin.label) { fontSize = fs, fontStyle = FontStyle.Bold, normal = { textColor = Color.white } };
+            Vector2 sz = style.CalcSize(new GUIContent(text));
+            if (y < 0) y = 0; if (x < 0) x = 0;
+            Fill(new Rect(x, y, sz.x + 12, sz.y + 4), new Color(0, 0, 0, 0.6f));
+            GUI.Label(new Rect(x + 6, y + 2, sz.x + 12, sz.y + 4), text, style);
+        }
+
+        private static void Fill(Rect r, Color c)
+        {
+            if (_px == null) { _px = new Texture2D(1, 1); _px.SetPixel(0, 0, Color.white); _px.Apply(); }
+            var old = GUI.color; GUI.color = c; GUI.DrawTexture(r, _px); GUI.color = old;
         }
 
         private static void DrawRect(Rect r, Color c, float th)
