@@ -178,6 +178,11 @@ namespace KebbiBrain.Real
         }
 
         private static string Trunc(string s, int n) => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s.Substring(0, n) + "…");
+
+        private void OnDestroy()   // 返回選單(重載場景)時關相機,釋放硬體
+        {
+            try { if (_cam != null) { _cam.Stop(); _cam = null; } } catch { }
+        }
     }
 }
 #endif

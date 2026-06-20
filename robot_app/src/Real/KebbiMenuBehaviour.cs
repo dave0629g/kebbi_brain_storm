@@ -38,8 +38,20 @@ namespace KebbiBrain.Real
 
         private void OnGUI()
         {
-            if (_launched) return;
             int sw = Screen.width, sh = Screen.height;
+            if (_launched)
+            {
+                // 功能執行中:畫「返回選單」鍵在最上層(GUI.depth 低=蓋在功能畫面上、優先收點擊)。
+                // 點了重載場景 → 乾淨關掉目前功能的 WebSocket/麥克風/相機(各 behaviour 的 OnDestroy 收尾)→ 回到選單。
+                GUI.depth = -1000;
+                float w = Mathf.Clamp(sw * 0.34f, 190f, 440f), h = Mathf.Clamp(sh * 0.058f, 72f, 130f);
+                var backStyle = new GUIStyle(GUI.skin.button) { fontSize = Mathf.Clamp(sh / 46, 18, 34), fontStyle = FontStyle.Bold };
+                var oldBg = GUI.backgroundColor; GUI.backgroundColor = new Color(0f, 0f, 0f, 0.7f);
+                if (GUI.Button(new Rect(16f, 16f, w, h), "← 返回選單", backStyle))
+                    UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
+                GUI.backgroundColor = oldBg;
+                return;
+            }
             var title = new GUIStyle(GUI.skin.label) { fontSize = Mathf.Clamp(sh / 26, 26, 60), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
             GUI.Label(new Rect(0, sh * 0.035f, sw, sh * 0.08f), "Kebbi 功能選單", title);
             var sub = new GUIStyle(GUI.skin.label) { fontSize = Mathf.Clamp(sh / 56, 14, 26), alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(.8f, .8f, .8f) } };
