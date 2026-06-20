@@ -81,7 +81,6 @@ namespace KebbiBrain.Real
             {
                 _ws = new ClientWebSocket();
                 await _ws.ConnectAsync(new Uri(GeminiLiveProtocol.WsUrl(apiKey)), _cts.Token);
-                _connected = true;
                 await SendRawAsync(GeminiLiveProtocol.BuildSetupJson(model, systemInstruction));
                 _ = Task.Run(ReceiveLoop);
                 _ = Task.Run(SendLoop);
