@@ -21,11 +21,11 @@ namespace KebbiBrain.Hardware
     public static class GeminiRoboticsProtocol
     {
         public const string DefaultModel = "gemini-robotics-er-1.6-preview";
+        public const string ApiKeyHeader = "x-goog-api-key";  // 金鑰走 header(不放 URL → 不會進 log/歷史)
 
-        public static string Endpoint(string model, string apiKey)
+        public static string Endpoint(string model)
             => "https://generativelanguage.googleapis.com/v1beta/models/" +
-               (string.IsNullOrEmpty(model) ? DefaultModel : model) +
-               ":generateContent?key=" + (apiKey ?? "");
+               (string.IsNullOrEmpty(model) ? DefaultModel : model) + ":generateContent";
 
         // 預設探索 prompt:要求只回中文 label + point + box 的純 JSON(方便疊在畫面上)。
         public const string DefaultPrompt =

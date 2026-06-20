@@ -8,6 +8,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Android;
 using UnityEngine.Networking;
 using KebbiBrain.Hardware;
 
@@ -18,7 +19,7 @@ namespace KebbiBrain.Real
         public string apiKey = "";
         public string model = GeminiRoboticsProtocol.DefaultModel;
         public string prompt = GeminiRoboticsProtocol.DefaultPrompt;
-        public float intervalSec = 4f;
+        public float intervalSec = 12f; // 放慢以避開 robotics-er preview 的免費額度限制(429);太快會 quota exceeded
 
         private WebCamTexture _cam;
         private Texture2D _frame;
@@ -37,17 +38,31 @@ namespace KebbiBrain.Real
                 Debug.LogWarning("[RoboVision] " + _status);
                 yield break;
             }
-            yield return Application.RequestUserAuthorization(UserAuthorization.WebCam);
-            if (!Application.HasUserAuthorization(UserAuthorization.WebCam))
-            { _status = "⚠ 沒有相機權限(請允許 CAMERA)"; Debug.LogWarning("[RoboVision] " + _status); yield break; }
+            // Android 正規相機權限(MIUI 會跳框 → 由 adb 自動點允許或使用者按)。
+            if (!Permission.HasUserAuthorizedPermission(Permission.Camera))
+            {
+                _status = "請允許相機權限…";
+                Permission.RequestUserPermission(Permission.Camera);
+                float t = 0f;
+                while (!Permission.HasUserAuthorizedPermission(Permission.Camera) && t < 12f)
+                { yield return new WaitForSeconds(0.5f); t += 0.5f; }
+            }
+            if (!Permission.HasUserAuthorizedPermission(Permission.Camera))
+            { _status = "⚠ 沒有相機權限(請到設定允許 CAMERA)"; Debug.LogWarning("[RoboVision] " + _status); yield break; }
 
+            // 給裝置時間枚舉相機(剛授權時 devices 可能還是空的)。
+            float wd = 0f;
+            while (WebCamTexture.devices.Length == 0 && wd < 4f) { yield return new WaitForSeconds(0.3f); wd += 0.3f; }
             string dev = null;
             foreach (var d in WebCamTexture.devices) { if (!d.isFrontFacing) { dev = d.name; break; } }  // 後鏡頭優先
             if (dev == null && WebCamTexture.devices.Length > 0) dev = WebCamTexture.devices[0].name;
             _cam = string.IsNullOrEmpty(dev) ? new WebCamTexture(1280, 720, 30) : new WebCamTexture(dev, 1280, 720, 30);
             _cam.Play();
-            _status = "相機開啟,每 " + intervalSec + "s 問一次 Gemini…";
-            Debug.Log("[RoboVision] " + _status + " (cam=" + dev + ")");
+            // 等相機真的開始吐影格(width 變 >16 才能取像)。
+            float wp = 0f;
+            while (_cam.width < 16 && wp < 6f) { yield return new WaitForSeconds(0.2f); wp += 0.2f; }
+            _status = "相機開啟(" + _cam.width + "x" + _cam.height + "),每 " + intervalSec + "s 問一次 Gemini…";
+            Debug.Log("[RoboVision] " + _status + " (cam=" + dev + " devs=" + WebCamTexture.devices.Length + ")");
             StartCoroutine(LoopAsync());
         }
 
@@ -72,11 +87,12 @@ namespace KebbiBrain.Real
             byte[] jpg = _frame.EncodeToJPG(60);
             string body = GeminiRoboticsProtocol.BuildRequestBody(Convert.ToBase64String(jpg), prompt);
 
-            using (var req = new UnityWebRequest(GeminiRoboticsProtocol.Endpoint(model, apiKey), "POST"))
+            using (var req = new UnityWebRequest(GeminiRoboticsProtocol.Endpoint(model), "POST"))
             {
                 req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
                 req.downloadHandler = new DownloadHandlerBuffer();
                 req.SetRequestHeader("Content-Type", "application/json");
+                req.SetRequestHeader(GeminiRoboticsProtocol.ApiKeyHeader, apiKey);  // 金鑰走 header,不進 URL
                 float t0 = Time.realtimeSinceStartup;
                 yield return req.SendWebRequest();
                 _lastMs = (int)((Time.realtimeSinceStartup - t0) * 1000f);
@@ -97,6 +113,7 @@ namespace KebbiBrain.Real
                     foreach (var d in _dets) sb.Append(d.Label).Append(' ');
                     _status = "✓ 第" + _shots + "張 · 認出 " + _dets.Count + " 物 · " + _lastMs + "ms";
                     Debug.Log("[RoboVision] " + _status + " → " + sb);
+                    if (_dets.Count == 0) Debug.Log("[RoboVision] (0物)原始回應: " + Trunc(resp, 240)); // 診斷:空場景 vs 解析漏
                 }
             }
             _busy = false;

@@ -67,7 +67,8 @@ public static class KebbiBuild
         kab.converseHuman = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_HUMAN") ?? "") == "1"; // 1=本機扮真人(測試替身)
         kab.converseGoal = System.Environment.GetEnvironmentVariable("KEBBI_CONV_GOAL") ?? "";            // 扮真人的目標(agenda 錨)
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
-        go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
+        if (mode != KebbiAppBehaviour.Mode.RoboticsVision)                 // 視覺模式:HUD 會蓋住相機畫面 → 不加
+            go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
         EditorSceneManager.SaveScene(scene, scenePath);
 
         System.IO.Directory.CreateDirectory("Build");

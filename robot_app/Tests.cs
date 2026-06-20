@@ -303,8 +303,8 @@ namespace KebbiBrain
         private static void T_GeminiRobotics()
         {
             // 端點 + 請求 body
-            string ep = Hardware.GeminiRoboticsProtocol.Endpoint("gemini-robotics-er-1.6-preview", "KEY123");
-            Check("RoboVision-端點含模型與key", ep.Contains("models/gemini-robotics-er-1.6-preview:generateContent") && ep.EndsWith("key=KEY123"));
+            string ep = Hardware.GeminiRoboticsProtocol.Endpoint("gemini-robotics-er-1.6-preview");
+            Check("RoboVision-端點含模型、key不進URL", ep.EndsWith("models/gemini-robotics-er-1.6-preview:generateContent") && !ep.Contains("key"));
             string body = Hardware.GeminiRoboticsProtocol.BuildRequestBody("QUJD", "找出杯子");
             Check("RoboVision-body 含 inline_data/jpeg", body.Contains("\"inline_data\"") && body.Contains("image/jpeg") && body.Contains("\"QUJD\""));
             Check("RoboVision-body 含 prompt 文字", body.Contains("找出杯子"));
