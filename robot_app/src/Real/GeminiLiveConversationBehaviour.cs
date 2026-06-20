@@ -52,7 +52,7 @@ namespace KebbiBrain.Real
         {
             if (string.IsNullOrEmpty(apiKey)) { _status = "⚠ 沒有 Gemini 金鑰(KEBBI_GEMINI_KEY)"; Debug.LogWarning("[Live] " + _status); yield break; }
             _outRate = AudioSettings.outputSampleRate;
-            _ring = new float[_outRate * 2];               // 2 秒緩衝
+            _ring = new float[_outRate * 20];              // 20 秒緩衝:模型常「比即時快」整段塞音訊,緩衝太小會丟樣本→忽快忽慢
             _pcmAccum = new byte[GeminiLiveProtocol.InputRate * 2];   // 1 秒 16-bit
             SetupPlayer();
 
@@ -139,7 +139,37 @@ namespace KebbiBrain.Real
             if (!string.IsNullOrEmpty(m.InputText)) _userText = m.InputText;
             if (!string.IsNullOrEmpty(m.OutputText)) _kebbiText = (_kebbiText + m.OutputText);
             if (!string.IsNullOrEmpty(m.AudioBase64)) EnqueueAudio(m.AudioBase64);
-            if (m.TurnComplete) { _turns++; _userText = ""; }
+            if (m.TurnComplete) { _turns++; _userText = ""; _rsInit = false; } // 下一輪音訊重設串流重採樣相位
+        }
+
+        // ── 串流式線性重採樣(24k 模型輸出 → 裝置 _outRate),相位/前一樣本跨塊連續 → 不斷、不漂 ──
+        private double _rsPos; private long _rsBase; private float _rsPrev; private bool _rsInit;
+        private float[] ResampleStream(float[] f)
+        {
+            int n = f.Length;
+            double ratio = (double)GeminiLiveProtocol.OutputRate / _outRate; // 每個輸出樣本前進幾個來源樣本(24000/outRate)
+            if (!_rsInit) { _rsPos = 0; _rsBase = 0; _rsPrev = 0; _rsInit = true; }
+            long hi = _rsBase + n - 1;
+            var outp = new float[(int)(n / ratio) + 2]; int o = 0;
+            while (true)
+            {
+                int i0 = (int)Math.Floor(_rsPos); int i1 = i0 + 1;
+                if (i1 > hi) break;                 // 要下一塊才能內插邊界
+                double frac = _rsPos - i0;
+                float s0 = SampleAt(i0, f, n), s1 = SampleAt(i1, f, n);
+                if (o < outp.Length) outp[o++] = (float)(s0 * (1 - frac) + s1 * frac);
+                _rsPos += ratio;
+            }
+            _rsBase += n; _rsPrev = f[n - 1];
+            if (o == outp.Length) return outp;
+            var t = new float[o]; Array.Copy(outp, t, o); return t;
+        }
+        private float SampleAt(long idx, float[] f, int n)
+        {
+            long li = idx - _rsBase;
+            if (li < 0) return _rsPrev;            // idx == _rsBase-1 → 前一塊最後一個樣本
+            if (li >= n) return f[n - 1];
+            return f[(int)li];
         }
 
         private void EnqueueAudio(string b64)
@@ -148,7 +178,8 @@ namespace KebbiBrain.Real
             try { pcm = Convert.FromBase64String(b64); } catch { return; }
             var f = new float[pcm.Length / 2];
             int n = GeminiLiveProtocol.Pcm16ToFloat(pcm, pcm.Length, f);
-            float[] outp = GeminiLiveProtocol.Resample(f, n, GeminiLiveProtocol.OutputRate, _outRate);
+            if (n <= 0) return;
+            float[] outp = ResampleStream(f);
             long w = Interlocked.Read(ref _wIdx), r = Interlocked.Read(ref _rIdx);
             int cap = _ring.Length;
             for (int i = 0; i < outp.Length; i++)

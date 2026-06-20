@@ -31,8 +31,9 @@ public static class KebbiBuild
     public static void BuildConverseSttApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-conversestt-arm64.apk", mode: KebbiAppBehaviour.Mode.ConverseStt);
     public static void BuildRoboticsVisionApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-robovision-arm64.apk", mode: KebbiAppBehaviour.Mode.RoboticsVision);
     public static void BuildLiveApk()       => Build(useRealRobotApi: false, apk: "Build/kebbi-live-arm64.apk", mode: KebbiAppBehaviour.Mode.LiveConversation);
+    public static void BuildMenuApk()       => Build(useRealRobotApi: false, apk: "Build/kebbi-menu-arm64.apk", menu: true); // 功能選單:一個功能一個按鈕
 
-    private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
+    private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah, bool menu = false)
     {
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.kebbibrain.app");
         PlayerSettings.productName = "KebbiBrain";
@@ -48,28 +49,12 @@ public static class KebbiBuild
         System.IO.Directory.CreateDirectory(sceneDir);
         var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
         var go = new GameObject("Kebbi");
-        var kab = go.AddComponent<KebbiAppBehaviour>();
-        kab.useRealRobotApi = useRealRobotApi; // false → 一般 Android 當模擬器測 middleware(body=SimKebbiBody)
-        kab.mode = mode;                       // LinkPingTest=驗 UDP 廣播;預設 G4_TebakArah
-        kab.peerIp = System.Environment.GetEnvironmentVariable("KEBBI_PEER_IP") ?? ""; // 對方 IP:WiFi 丟廣播時靠 unicast 直連(非機密,可空)
-        var rid = System.Environment.GetEnvironmentVariable("KEBBI_ROBOT_ID");        // 每台設不同 ID(多機;同 ID 會把對方當自己回音丟棄),可空=預設 Kebbi-A
-        if (!string.IsNullOrEmpty(rid)) kab.robotId = rid;
-        var prid = System.Environment.GetEnvironmentVariable("KEBBI_PEER_ROBOT_ID");  // Director 要驅動的被控機 ID,可空=預設 Kebbi-B
-        if (!string.IsNullOrEmpty(prid)) kab.peerRobotId = prid;
-        // Converse 對話模式的人格/開場(可空=用預設)
-        var pn = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_NAME");
-        if (!string.IsNullOrEmpty(pn)) kab.personaName = pn;
-        var pc = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_CHAR");
-        if (!string.IsNullOrEmpty(pc)) kab.personaCharacter = pc;
-        var pl = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_LANG"); // id-ID / zh-TW
-        if (!string.IsNullOrEmpty(pl)) kab.personaLang = pl;
-        kab.peerName = System.Environment.GetEnvironmentVariable("KEBBI_PEER_NAME") ?? "";
-        kab.converseStarter = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_STARTER") ?? "") == "1";
-        kab.converseHuman = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_HUMAN") ?? "") == "1"; // 1=本機扮真人(測試替身)
-        kab.converseGoal = System.Environment.GetEnvironmentVariable("KEBBI_CONV_GOAL") ?? "";            // 扮真人的目標(agenda 錨)
-        kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
-        if (mode != KebbiAppBehaviour.Mode.RoboticsVision && mode != KebbiAppBehaviour.Mode.LiveConversation) // 視覺/Live:有自己的疊圖 → 不加會蓋畫面的 HUD
-            go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
+        if (menu)
+        {
+            var mb = go.AddComponent<KebbiBrain.Real.KebbiMenuBehaviour>();
+            mb.secrets = InjectSecretsFromEnv();   // 🔐 注入金鑰;選單依使用者點選再跑各功能
+        }
+        else { BuildModeScene(go, useRealRobotApi, mode); }
         EditorSceneManager.SaveScene(scene, scenePath);
 
         System.IO.Directory.CreateDirectory("Build");
@@ -92,6 +77,32 @@ public static class KebbiBuild
         var s = report.summary;
         Debug.Log($"[KebbiBuild] RESULT={s.result} useRealRobotApi={useRealRobotApi} errors={s.totalErrors} warnings={s.totalWarnings} sizeBytes={s.totalSize} out={s.outputPath}");
         EditorApplication.Exit(s.result == UnityEditor.Build.Reporting.BuildResult.Succeeded ? 0 : 1);
+    }
+
+    // 單一 Mode 場景:掛 KebbiAppBehaviour、依 env 設機身/多機/persona、注金鑰、必要時加 HUD。
+    private static void BuildModeScene(GameObject go, bool useRealRobotApi, KebbiAppBehaviour.Mode mode)
+    {
+        var kab = go.AddComponent<KebbiAppBehaviour>();
+        kab.useRealRobotApi = useRealRobotApi; // false → 一般 Android 當模擬器測 middleware(body=SimKebbiBody)
+        kab.mode = mode;                       // LinkPingTest=驗 UDP 廣播;預設 G4_TebakArah
+        kab.peerIp = System.Environment.GetEnvironmentVariable("KEBBI_PEER_IP") ?? ""; // 對方 IP:WiFi 丟廣播時靠 unicast 直連(非機密,可空)
+        var rid = System.Environment.GetEnvironmentVariable("KEBBI_ROBOT_ID");        // 每台設不同 ID(多機;同 ID 會把對方當自己回音丟棄),可空=預設 Kebbi-A
+        if (!string.IsNullOrEmpty(rid)) kab.robotId = rid;
+        var prid = System.Environment.GetEnvironmentVariable("KEBBI_PEER_ROBOT_ID");  // Director 要驅動的被控機 ID,可空=預設 Kebbi-B
+        if (!string.IsNullOrEmpty(prid)) kab.peerRobotId = prid;
+        var pn = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_NAME");
+        if (!string.IsNullOrEmpty(pn)) kab.personaName = pn;
+        var pc = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_CHAR");
+        if (!string.IsNullOrEmpty(pc)) kab.personaCharacter = pc;
+        var pl = System.Environment.GetEnvironmentVariable("KEBBI_PERSONA_LANG"); // id-ID / zh-TW
+        if (!string.IsNullOrEmpty(pl)) kab.personaLang = pl;
+        kab.peerName = System.Environment.GetEnvironmentVariable("KEBBI_PEER_NAME") ?? "";
+        kab.converseStarter = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_STARTER") ?? "") == "1";
+        kab.converseHuman = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_HUMAN") ?? "") == "1"; // 1=本機扮真人(測試替身)
+        kab.converseGoal = System.Environment.GetEnvironmentVariable("KEBBI_CONV_GOAL") ?? "";            // 扮真人的目標(agenda 錨)
+        kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
+        if (mode != KebbiAppBehaviour.Mode.RoboticsVision && mode != KebbiAppBehaviour.Mode.LiveConversation) // 視覺/Live:有自己的疊圖 → 不加會蓋畫面的 HUD
+            go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
     }
 
     // 從環境變數注入金鑰到 KebbiSecrets.asset。回傳該 asset(指派給 KebbiAppBehaviour.secrets)。

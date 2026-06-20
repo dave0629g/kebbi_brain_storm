@@ -28,6 +28,7 @@ case "${1:-middleware}" in
   conversestt) METHOD="KebbiBuild.BuildConverseSttApk" ;; # Kebbi↔真人:麥克風聽+STT→語意端點偵測→LLM→TTS(不靠網路 token;第二台設 KEBBI_CONV_HUMAN=1 扮真人)
   robovision) METHOD="KebbiBuild.BuildRoboticsVisionApk" ;; # Gemini Robotics-ER 視覺:相機→認物/指認→螢幕框出(需 KEBBI_GEMINI_KEY)
   live)       METHOD="KebbiBuild.BuildLiveApk" ;;          # Gemini Live 即時語音對話:麥克風→Kebbi 語音回+字幕(需 KEBBI_GEMINI_KEY)
+  menu)       METHOD="KebbiBuild.BuildMenuApk" ;;          # 功能選單:一個功能一個按鈕,點選進入(視覺/Live/G4/兩台對話)
   verify)     METHOD="KebbiBuild.VerifySecretsRoundTrip" ;;
   *) echo "用法: $0 [middleware|real|linkping|verify]"; exit 2 ;;
 esac
