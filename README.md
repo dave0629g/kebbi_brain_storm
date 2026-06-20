@@ -108,7 +108,61 @@ Unity 端沒有環境變數 → 用 `KebbiSecrets` ScriptableObject 注入(其 `
 
 ## 相關研究 (References)
 
-本專案的「兩機印尼語聽說對話」STT 版,參考了對話 turn-taking、端點偵測(endpointing/VAD)、full-duplex/AEC,以及分散式系統 floor-control 的研究。核心設計取捨:**內容走空氣(TTS→對方麥克風+Azure STT),但「誰有發言權」走網路 floor token**。
+本專案的聽說對話分兩種情境,設計與依據不同——**先講最重要的校正**:
+
+| 情境 | 換誰說(turn-taking)怎麼決定 | 用在 |
+|---|---|---|
+| **Kebbi ↔ 真人(主線)** | Kebbi **自己用聲音/語意判斷對方講完沒**(語意完整度 COMPLETE/INCOMPLETE + 靜音),**不靠對方送任何信號** | 真實落地:Kebbi 跟學生/使用者對話。測試時第二支手機「扮真人」 |
+| **Kebbi ↔ Kebbi(多機協作)** | 網路 **floor token** 交棒(`CV|`/done 信號) | G1/G2/G5 雙機接力、合體彩蛋——兩台都是我們的機器,可走網路 |
+
+> **⚠️ 校正(本輪重點):** 前一版的 STT 對話用網路 floor token 交棒——但**真人不會送網路信號給 Kebbi**,這在「真人↔Kebbi」情境屬**作弊**(繞過了「Kebbi 到底能不能自己聽出對方講完沒」這個真正要驗的能力)。本輪把 `ConversationSttGame` 改成**純靠聲學/語意自行判斷端點**,floor token 只留給多機。下面先講主線(真人版),再附多機版。
+
+兩者都參考了對話 turn-taking、端點偵測(endpointing/VAD)、user simulation,以及分散式系統 floor-control 的研究。共同設計取捨:**內容走空氣(TTS→對方麥克風+Azure STT)**。
+
+## 〔主線〕Kebbi↔真人對話系統 — 語意端點偵測(不靠網路 token)
+
+> 真實用途:Kebbi 跟一個**真人**講話 —— 真人開口、Kebbi 麥克風聽+Azure STT、**自己判斷真人講完沒**、再 LLM+TTS 回應。
+> 測試時沒有真人在場,改用**第二支 Android 手機「扮演真人」**(對空氣 TTS 發聲讓 Kebbi 收;`KEBBI_CONV_HUMAN=1`)。
+
+### 技術限制(正交於串流方案)
+Unity 固定秒數錄音(非串流)、Azure STT 整段批次(無 partial)、隔空收音有噪音、有 LLM 可用、cascaded ASR→LLM→TTS。因此**不做真 full-duplex**,只借串流論文的「語意完整度概念」與「假插話率評估法」,不照搬串流實作。
+
+### 系統架構(對應 `IVoice` / `ILlm` / `ConversationGame`)
+`IVoice.ListenAsync`(麥克風+整段 STT)→ **端點決策(把「何時回應」獨立出來)** → `ILlm.AskAsync`(語意理解+生回應)→ `IVoice.SpeakAsync`(TTS)。
+- cascaded 路線有權威背書:ESPnet-SDS(NAACL'25)實測 cascaded 在音質/回應多樣性**仍勝** end-to-end;FurChat(SIGDIAL'23)證明「LLM 當腦+機器人當身體」在真實 HRI 已可用。
+- 把「何時回應」從「回應什麼」拆開(Kennington/Lison/Schlangen 2025)。
+- 非語言行為(轉向學生 DOA/FaceFully、點頭 backchannel)須與回話時序同步(Blossom-SAR 2025、Building for speech 2025)。
+
+### Kebbi 端 endpoint 怎麼判(`ConversationSttGame` 實作)
+| 我們的做法 | 解決的問題 | 來源論文 |
+|---|---|---|
+| **LLM 語意完整度 COMPLETE/INCOMPLETE**(累積 transcript 餵 `ILlm`,INCOMPLETE=「繼續聽、不要回」的明確狀態) | 端點誤判(把對方一句切斷就插話) | Phoenix-VAD (Wu et al. 2025);Speculative End-Turn (Ok et al. 2025);LiveKit Turn Detector 2024-25(純文字 transcript 路徑) |
+| **靜音雙路 + 投機式判斷**(未完就延長錄音再收一段,不固定 4 秒就插話) | 把停頓誤判成講完 | Addlesee & Papaioannou 2025(長停頓/斷續是端點誤判主因) |
+| **IU 可撤回假設**(每窗 STT 當「暫定講完」;對方續講就 revoke、把兩段 transcript 串接再判) | 批次 STT 把一句切兩半 | Schlangen & Skantze 2009(Incremental Unit);Kennington et al. 2025 |
+| **COMPLETE 後留短 grace window** 等對方 steer/補一句 | 把「講完還想加一句/改口」切斷 | STEER (Zhang et al. 2023, Apple) |
+| **短 backchannel(嗯/Iya)當「我在聽」**+ 臉部/姿態顯式聆聽訊號 + 依複雜度延遲掩蔽 | 真人因等太久而 barge-in | ERICA (Kawahara 2021);Building for speech 2025;SID-bench 2026(backchannel 不計搶話) |
+
+### 第二支手機怎麼忠實「扮演真人」(不發網路信號)
+- **persona+goal 硬綁的 agenda 骨架**(Schatzmann 2007):給明確 goal + agenda 決定每輪講什麼,讓測試可重現、可寫回歸 case。
+- **刻意「反 assistant 化」**(Naous 2025 UserLM-8b):別再跑一個 Kebbi 同款助理 LLM 當人(太配合會低估 Kebbi 問題),給「會停頓想字、講不完整、會追問」的真人風格(Wang 2025 Implicit Profiles)。
+- **goal 不可漂移**(Sekulić 2024 DAUS、Davidson 2023):checker 驗有沒有偏題,否則分不清是 Kebbi 爛還是模擬人亂跑。
+- **只走空氣不走網路**:手機只 TTS 對空氣發聲讓 Kebbi 收,**不送任何 floor token、不告訴 Kebbi「我講完了」**。
+- **植入難樣本**壓測端點:中途停頓再補一句(用 `…` 標,實作會在此插真實停頓)、改口、含糊/語速快、突然沉默(ChatChecker 非合作型)。
+- 上場前先過「像不像真人」驗收:MirrorBench(詞彙多樣性)+ Eval4Sim(adherence/consistency/naturalness),防中途崩人設變回 AI 助理腔。
+
+### 評估計畫(兩層 + 自動指標)
+- **兩層**(Pietquin & Hastie 2013):直接層=手機扮得像不像真人;間接層=用它測 Kebbi 的結論能否外推真實學生。
+- **核心指標**:Takeover Rate(該停不停=搶話率,Full-Duplex-Bench)、接話延遲、False Interruption Rate(固定高 TPR 下,LiveKit)、非語意斷點插話(SID-bench)、GSR(校準逼近真人,Davidson)、整場順暢度 LLM 評分。
+- **最小可行實驗**:手機在預設位置插 1.5–3s 思考停頓 → 量 Kebbi 的 Takeover Rate / 假插話率,客觀證明「Kebbi 自己判端點、不作弊、不搶話」。
+- **人評格式**(Skantze & Irfan HRI'25):within-subject 比「新版語意 endpoint」vs「固定 4 秒窗 baseline」,量偏好/延遲/插嘴;目標 <1.5s、插嘴<7%。
+
+> **自測對應**:`Tests.T_ConversationStt` 用 `VirtualAir` 兩機端到端(無任何網路 token)驗證:Kebbi 在對方「…」停頓時忍住不插話(`PauseHolds≥1`)、IU 串接被切半的句子、判 COMPLETE 才接話、久無聲音自我修正主動開口。
+
+---
+
+## 〔多機版,僅 G1/G2/G5〕兩台 Kebbi 接力 — floor token 交棒
+
+> 以下是**兩台都是我們機器人**時的設計(可走網路)。真人對話**不用**這套(見上面主線)。
 
 ### 我們用到的技術 ↔ 對應文獻
 
@@ -126,10 +180,11 @@ Unity 端沒有環境變數 → 用 `KebbiSecrets` ScriptableObject 注入(其 `
 - **聲學 turn 模型不跨語言通用**:Multilingual VAP (Inoue et al. 2024) 證明 turn 聲學模型換語言會失效,印尼語無訓練資料 → 我們改用 LLM 語意理解。
 - **真 full-duplex 套不上我們的管線**:Moshi (Défossez et al. 2024)、VAP (Ekstedt & Skantze 2022)、訊號級/Android 原生 AEC 都需要「串流音訊 + 自己播放訊號當參考 + 對方乾淨分軌」,與「Unity 固定秒數錄音 + Azure 整段 WAV 批次 STT」正交。因此我們**不做真 full-duplex**,改用「更快的半雙工交棒 + 短 backchannel + 語意層回音過濾」。
 
-### 一句話結論
-> 文字版的 **done 信號就是分散式/對話系統文獻公認的 floor-control 最可靠解**(token passing / explicit floor release)。對稱兩端各跑自己的時鐘 = 沒有可靠載波偵測的 CSMA,注定週期碰撞;有網路通道就用 token。STT 版只把「內容來源」從 UDP 文字換成「空氣聲→STT」,floor 機制原封不動繼承。
+### 一句話結論(多機版)
+> **兩台都是我們機器人時**,done 信號就是分散式/對話系統文獻公認的 floor-control 最可靠解(token passing / explicit floor release):對稱兩端各跑自己的時鐘 = 沒有可靠載波偵測的 CSMA,注定週期碰撞;有網路通道就用 token。
+> **但真人↔Kebbi 沒有這個網路通道**——真人不送 token,所以主線改成 Kebbi 自己用語意+靜音判端點(見上面主線),token 只留多機。
 
-### 主要論文連結
+### 主要論文連結(第一輪:turn-taking 基本款)
 - Sacks, Schegloff & Jefferson (1974), *A Simplest Systematics...* — https://www.jstor.org/stable/412243
 - Skantze (2021), *Turn-taking ... A Review*, CS&L 67:101178 — https://www.sciencedirect.com/science/article/pii/S088523082030111X
 - Ekstedt & Skantze (2020), *TurnGPT* — https://aclanthology.org/2020.findings-emnlp.268/
@@ -144,3 +199,29 @@ Unity 端沒有環境變數 → 用 `KebbiSecrets` ScriptableObject 注入(其 `
 - Bianchi (2000), *802.11 DCF performance* — https://ieeexplore.ieee.org/document/840210
 - Défossez et al. (2024), *Moshi* — https://arxiv.org/abs/2410.00037
 - Inoue et al. (2024), *Multilingual VAP*, LREC-COLING — https://arxiv.org/abs/2403.06487
+
+### 主要論文連結(第二輪:user-simulation / 人面向 endpoint / 評估)
+新增於「Kebbi↔真人」校正:讓第二支手機忠實扮真人、讓 Kebbi 自己判端點、怎麼評估。
+- Schatzmann et al. (2007), *Agenda-Based User Simulation* — https://aclanthology.org/N07-2038/
+- Naous et al. (2025), *UserLM-8b (Flipping the Dialogue)* — https://arxiv.org/abs/2510.06552
+- Sekulić et al. (2024), *DAUS: Reliable LLM-based User Simulator* — https://arxiv.org/abs/2402.13374
+- Davidson et al. (2023), *User Simulation with LLMs for Eval* (AWS) — https://arxiv.org/abs/2309.13233
+- Wang et al. (2025), *Know You First (Implicit Profiles)* — https://arxiv.org/abs/2502.18968
+- Mayr et al. (2025), *ChatChecker* (Cambridge) — https://arxiv.org/abs/2507.16792
+- Ai & Weng (2008), *User Simulation as Testing* — https://aclanthology.org/W08-0126/
+- Ok, Yoo & Lee (2025), *Speculative End-Turn Detector* — https://arxiv.org/abs/2503.23439
+- Wu et al. (2025), *Phoenix-VAD: Streaming Semantic Endpoint Detection* — https://arxiv.org/abs/2509.20410
+- Zhang et al. (2023), *STEER* (Apple, EMNLP Industry) — https://aclanthology.org/2023.emnlp-industry.61/
+- Addlesee & Papaioannou (2025), *Building for speech* — https://www.frontiersin.org/articles/10.3389/frobt.2024.1356477/full
+- Skantze & Irfan (2025), *General Turn-taking Models to HRI* (HRI'25) — https://arxiv.org/abs/2501.08946
+- Arora et al. (2025), *ESPnet-SDS* (NAACL Demo) — https://arxiv.org/abs/2503.08533
+- Cherakara et al. (2023), *FurChat* (SIGDIAL) — https://arxiv.org/abs/2308.15214
+- Kawahara et al. (2021), *ERICA Attentive Listening* — https://arxiv.org/abs/2105.00403
+- Schlangen & Skantze (2009), *Incremental Unit framework* — https://aclanthology.org/E09-1081/
+- Kennington, Lison & Schlangen (2025), *Incremental Dialogue Management survey* — https://arxiv.org/abs/2501.00953
+- Lin et al. (2025), *Full-Duplex-Bench* — https://arxiv.org/abs/2503.04721 ;v2 — https://arxiv.org/abs/2510.07838
+- LiveKit Turn Detector (2024-25) — https://livekit.com/blog/improved-end-of-turn-model-cuts-voice-ai-interruptions-39
+- Zheng et al. (2023), *LLM-as-a-Judge (MT-Bench)* — https://arxiv.org/abs/2306.05685
+- Deriu et al. (2021), *Survey on Evaluation Methods for Dialogue Systems* — https://arxiv.org/abs/1905.04071
+- Pietquin & Hastie (2013), *Survey on metrics for user simulation* — https://homepages.inf.ed.ac.uk/hhastie2/pubs/pietquin_hastie_surveyusersimKER.pdf
+- MirrorBench (Hathidara et al. 2026)、Eval4Sim (Bao et al. 2026)、SID-bench (Xia et al. 2026) 為 2026 預印,引用前再人工核對正式出處。

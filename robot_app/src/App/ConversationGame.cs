@@ -21,15 +21,44 @@ namespace KebbiBrain.App
             public string Name;       // 角色名(會出現在對話與 TTS,如 "Andi"/"小明")
             public string Character;   // 人格描述(該語言或中文皆可,餵進 LLM system)
             public string Lang = "id-ID"; // "id-ID"=印尼語、"zh-TW"=台灣中文(TTS 走 Config.VoiceForLang)
+            public bool Human;        // true=「扮演真人」的測試替身(反 assistant、會遲疑、會把話講一半);false=Kebbi/助理
+            public string Goal;       // 扮真人時的目標(agenda 錨;DAUS 防漂題;如「問去圖書館怎麼走、要左轉那條」)
             private bool Zh => (Lang ?? "").StartsWith("zh");
-            // 給 LLM 的 system:鎖語言、單句、保持人格、別複讀對方。依 Lang 切換印尼語/台灣中文。
+
+            // 「講到一半停頓想詞」標記:扮真人時,SpeakAsync 會在此插入真實停頓 → 逼對方(Kebbi)判斷端點。
+            public const string PauseMark = "…";
+            // 端點判斷 system 的識別前綴(讓判斷 prompt 跟回應 prompt 分得開;測試亦據此辨識)。
+            public const string JudgeTag = "[[ENDPOINT-JUDGE]]";
+
+            // 給 LLM 的回應 system:鎖語言、單句、保持人格。依 Lang 切換,並依 Human 切換「真人腔 vs 助理腔」。
+            //   Human=true(扮真人):刻意反 assistant(UserLM-8b 2025)——口語、會遲疑、會把話講一半(用 PauseMark 標)、
+            //     錨定 Goal(Schatzmann agenda 2007 / DAUS 2024 防漂題)、注入真人風格(Implicit Profiles 2025)。
+            //   Human=false(Kebbi/助理):工整、回應對方、別複讀。
             public string SystemPrompt()
-                => Zh
-                ? $"你是{Name}。{Character} 只用「繁體中文(台灣用語)」說話,每次只回一句、簡短自然、保持你的人格。回應對方的話,不要複述他說過的。"
-                : $"Kamu adalah {Name}. {Character} Bicaralah HANYA dalam Bahasa Indonesia, satu kalimat singkat, natural, tetap dalam karakter. Tanggapi lawan bicara; jangan mengulang kata-katanya.";
+            {
+                if (Human)
+                    return Zh
+                    ? $"你是{Name},一個正在跟機器人聊天的「真人」(不是助理、不是客服)。{Character} 你想做的事:{Goal}。" +
+                      $"只用繁體中文(台灣口語)。像真人那樣講話:口語、有時候會猶豫想詞、會把話講到一半才接下去——需要停頓想詞時用「{PauseMark}」標出來(例如「我想去{PauseMark}那個圖書館」)。每次只講一句、簡短,別像客服那樣每句都工整講滿。"
+                    : $"Kamu adalah {Name}, seorang MANUSIA yang sedang mengobrol dengan robot (bukan asisten/CS). {Character} Yang kamu mau: {Goal}. " +
+                      $"Bicara HANYA dalam Bahasa Indonesia, gaya santai. Bicaralah seperti manusia: kadang ragu, mikir dulu, kalimat belum selesai lalu dilanjut — tandai jeda berpikir dengan «{PauseMark}» (mis. 'Aku mau ke{PauseMark}perpustakaan'). Satu kalimat singkat tiap giliran, jangan rapi seperti customer service.";
+                return Zh
+                    ? $"你是{Name}。{Character} 只用「繁體中文(台灣用語)」說話,每次只回一句、簡短自然、保持你的人格。回應對方的話,不要複述他說過的。"
+                    : $"Kamu adalah {Name}. {Character} Bicaralah HANYA dalam Bahasa Indonesia, satu kalimat singkat, natural, tetap dalam karakter. Tanggapi lawan bicara; jangan mengulang kata-katanya.";
+            }
+
             // 開場(對話歷史為空時)的 user 提示。
             public string OpeningUser()
                 => Zh ? "用友善的招呼開始這段對話。" : "Mulai percakapan dengan sapaan ramah.";
+
+            // 端點判斷 system:讓「聽的一方」自己判斷對方是否把一句話講完了(語意完整度)。
+            // 只回 COMPLETE / INCOMPLETE(Phoenix-VAD 2025 / LiveKit Turn Detector 的離散文字版,合我們無 partial 的批次 STT)。
+            public string EndpointJudgeSystem()
+                => Zh
+                ? JudgeTag + " 你在判斷『對方這句話講完了沒』。讀對方目前已經說出的內容,只回一個詞:" +
+                  "COMPLETE=已經表達完一個完整的意思、輪到我回應了;INCOMPLETE=話只講到一半、停在連接詞、還在停頓想詞、或還沒答完被問的事。只輸出 COMPLETE 或 INCOMPLETE,不要其他字。"
+                : JudgeTag + " Nilai apakah lawan bicara SUDAH selesai bicara. Baca yang sudah dia ucapkan, jawab SATU kata: " +
+                  "COMPLETE=maknanya sudah lengkap, giliranku menjawab; INCOMPLETE=kalimat belum selesai / berhenti di kata sambung / masih mikir. Output hanya COMPLETE atau INCOMPLETE.";
         }
 
         public const string Pfx = "CV";

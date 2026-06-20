@@ -43,6 +43,8 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     public string personaLang = "id-ID";                // 對話語言:id-ID 印尼語 / zh-TW 台灣中文
     public string peerName = "";                        // 對方角色名(顯示用;空=用 peerRobotId)
     public bool converseStarter = false;                // true=本機先開口
+    public bool converseHuman = false;                  // true=本機「扮演真人」(ConverseStt 測試替身:反 assistant、會遲疑停頓)
+    public string converseGoal = "";                    // 扮真人時的目標(agenda 錨;空=泛聊)
 
     private readonly CancellationTokenSource _life = new CancellationTokenSource();
     private UnityRobotLink _link;
@@ -191,19 +193,26 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         await game.RunAsync(converseStarter, maxTurns: 0); // 0=持續對話直到 app 關
     }
 
-    // ── STT 版「真·兩機聽說對話」(對比 Converse 的文字直送):無網路,用麥克風聽對方+STT→LLM→TTS ──
-    // 兩台擺近、麥克風對喇叭;其中一台 converseStarter=true 先開口。
+    // ── STT 版「Kebbi↔真人」聽說對話(語意端點偵測;不靠網路 token,見 README) ──
+    // 內容走空氣(ctx.Voice 的 STT 聽對方),端點(換誰說)Kebbi 自己用語意完整度+靜音判斷。
+    // 測試時第二支手機 converseHuman=true「扮真人」;其中一台 converseStarter=true 先開口。
+    // realLink 只用於「兩支手機開機對齊」的起跑同步(可省),turn-taking 完全不碰它。
     private async Task RunConverseSttAsync()
     {
         var realLink = new UnityRobotLink(robotId, UnityRobotLink.DefaultPort, PeerIps());
         _link = realLink;
         var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
-        var me = new ConversationGame.Persona { Name = personaName, Character = personaCharacter, Lang = personaLang };
-        // 內容走空氣(ctx.Voice 的 STT 聽對方),floor 走網路(realLink 的 token)。
-        var game = new ConversationSttGame(ctx.Voice, ctx.Llm, realLink, me, peerRobotId,
-                                           string.IsNullOrEmpty(peerName) ? peerRobotId : peerName, Debug.Log);
-        Debug.Log("[ConverseStt] " + personaName + " STT 聽對方+floor token 交棒," +
-                  (converseStarter ? "我先持 floor" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
+        var me = new ConversationGame.Persona
+        {
+            Name = personaName, Character = personaCharacter, Lang = personaLang,
+            Human = converseHuman, Goal = converseGoal,
+        };
+        var game = new ConversationSttGame(ctx.Voice, ctx.Llm, me,
+                                           string.IsNullOrEmpty(peerName) ? peerRobotId : peerName,
+                                           Debug.Log, realLink, peerRobotId);
+        Debug.Log("[ConverseStt] " + personaName + (converseHuman ? "(扮真人)" : "(Kebbi)") +
+                  " 用語意端點偵測判對方講完沒(不靠網路 token)," +
+                  (converseStarter ? "我先開口" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
         await game.RunAsync(converseStarter, maxTurns: 0);
     }
 

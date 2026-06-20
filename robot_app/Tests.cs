@@ -300,28 +300,55 @@ namespace KebbiBrain
 
         private static void T_ConversationStt()
         {
-            // floor-token 版:內容走空氣(STT 聽=RecordingVoice 的 EnqueueHeard),floor 走網路 token。
+            // 語意端點版(無網路 floor token):Kebbi 用「LLM 語意完整度 + 靜音」自己判斷對方講完沒。
             Action<string> noop = _ => { };
-            var bus = new SimRobotBus(noop);
-            var la = bus.CreateLink("A");
-            var lb = bus.CreateLink("B");
-            var va = new RecordingVoice { ListenDelayMs = 8 };  // Andi 聽 Budi
-            var vb = new RecordingVoice { ListenDelayMs = 8 };  // Budi 聽 Andi
-            for (int i = 0; i < 6; i++) { va.EnqueueHeard("dari Budi " + i); vb.EnqueueHeard("dari Andi " + i); }
-            var pa = new App.ConversationGame.Persona { Name = "Andi", Character = "periang.", Lang = "id-ID" };
-            var pb = new App.ConversationGame.Persona { Name = "Budi", Character = "tenang.", Lang = "id-ID" };
-            var ga = new App.ConversationSttGame(va, new SimLlm(noop), la, pa, "B", "Budi") { HandshakeIntervalMs = 20, MaxListenWindowsWaitingFloor = 80 };
-            var gb = new App.ConversationSttGame(vb, new SimLlm(noop), lb, pb, "A", "Andi") { HandshakeIntervalMs = 20, MaxListenWindowsWaitingFloor = 80 };
 
-            var ta = ga.RunAsync(starter: true, maxTurns: 2);
-            var tb = gb.RunAsync(starter: false, maxTurns: 2);
-            bool done = System.Threading.Tasks.Task.WhenAll(ta, tb).Wait(12000);
+            // ── (A) 單機端點:半句→停頓(忍住不插話)→IU 串接補完→COMPLETE 才接話 ──
+            var voice = new RecordingVoice { ListenDelayMs = 2 };
+            voice.EnqueueHeard("我想去");        // INCOMPLETE(沒講完)
+            voice.EnqueueHeard("");               // 靜音 → 判 INCOMPLETE → 忍住(對方只是停頓想詞)
+            voice.EnqueueHeard("那個圖書館。");   // 對方續講 → revoke + 串接
+            voice.EnqueueHeard("");               // 靜音 → 判 COMPLETE → 換我說
+            var kebbi = new App.ConversationGame.Persona { Name = "凱比", Character = "親切。", Lang = "zh-TW", Human = false };
+            var gA = new App.ConversationSttGame(voice, new EndpointJudgeLlm(new[] { "嗯,圖書館往前直走喔。" }),
+                                                 kebbi, "學生", noop) { MaxListenWindows = 12 };
+            bool okA = gA.RunAsync(starter: false, maxTurns: 1).Wait(5000);
+            Check("STT端點-完成不卡死", okA);
+            Check("STT端點-對方停頓時忍住沒插話(不誤判)", gA.PauseHolds >= 1);
+            Check("STT端點-IU 串接被切半的句子", string.Join("|", gA.History).Contains("學生: 我想去 那個圖書館。"));
+            Check("STT端點-revoke 計數>=1", gA.Revocations >= 1);
+            Check("STT端點-判定講完才接話(聽到1輪)", gA.HeardTurns == 1);
+            Check("STT端點-Kebbi 接了1句(zh-TW)", gA.MyTurns == 1 && voice.LastLang == "zh-TW");
 
-            Check("STT對話-floor token 雙方完成不卡死", done);
-            Check("STT對話-A 講 2 句(印尼語 TTS)", ga.MyTurns == 2 && va.LastLang == "id-ID");
-            Check("STT對話-B 講 2 句", gb.MyTurns == 2);
-            Check("STT對話-B 用 STT 聽到並記錄對方(Andi)", string.Join("|", gb.History).Contains("Andi: dari Andi"));
-            Check("STT對話-A 用 STT 聽到並記錄對方(Budi)", string.Join("|", ga.History).Contains("Budi: dari Budi"));
+            // ── (B) 久無聲音 → 自我修正主動開口(對方掉線不卡死)──
+            var voice2 = new RecordingVoice { ListenDelayMs = 1 }; // 全靜音(沒人說話)
+            var kebbi2 = new App.ConversationGame.Persona { Name = "凱比", Character = "親切。", Lang = "zh-TW" };
+            var gB = new App.ConversationSttGame(voice2, new EndpointJudgeLlm(new[] { "哈囉,有人在嗎?" }),
+                                                 kebbi2, "學生", noop) { MaxListenWindows = 5 };
+            bool okB = gB.RunAsync(starter: false, maxTurns: 1).Wait(5000);
+            Check("STT端點-久無聲音自我修正主動開口", okB && gB.HeardTurns == 0 && gB.MyTurns == 1);
+
+            // ── (C) 兩機端到端(無 token):Kebbi ↔ 扮真人手機,內容走空氣、端點各自靠語意判 ──
+            var air = new VirtualAir();
+            var vK = new AirVoice(air, "Kebbi");
+            var vH = new AirVoice(air, "Stu");
+            var pKebbi = new App.ConversationGame.Persona { Name = "凱比", Character = "親切的機器人。", Lang = "zh-TW", Human = false };
+            var pHuman = new App.ConversationGame.Persona { Name = "小明", Character = "國中生。", Lang = "zh-TW", Human = true, Goal = "問去圖書館怎麼走" };
+            // 扮真人(gH)說話會在「…」處分段插真實停頓(PeerChunkGapMs);Kebbi(gK)須在停頓時忍住不插話。
+            var gK = new App.ConversationSttGame(vK, new EndpointJudgeLlm(new[] { "你好啊!", "圖書館往前直走喔。", "不客氣!" }),
+                                                 pKebbi, "小明", noop) { MaxListenWindows = 400, MaxSilenceHold = 20 };
+            var gH = new App.ConversationSttGame(vH, new EndpointJudgeLlm(new[] { "嗯…我想問個路。", "這樣啊…那謝謝你。", "掰掰。" }),
+                                                 pHuman, "凱比", noop) { MaxListenWindows = 400, MaxSilenceHold = 20, PeerChunkGapMs = 15 };
+            var tK = gK.RunAsync(starter: true, maxTurns: 2);
+            var tH = gH.RunAsync(starter: false, maxTurns: 2);
+            bool done = Task.WhenAll(tK, tH).Wait(15000);
+
+            Check("STT對話-無 token 兩機端到端完成不卡死", done);
+            Check("STT對話-Kebbi 說了 2 句", gK.MyTurns == 2);
+            Check("STT對話-扮真人手機說了 2 句", gH.MyTurns == 2);
+            Check("STT對話-Kebbi 用 STT 聽到並記錄對方(小明)", string.Join("|", gK.History).Contains("小明:"));
+            Check("STT對話-扮真人用 STT 聽到並記錄對方(凱比)", string.Join("|", gH.History).Contains("凱比:"));
+            Check("STT對話-Kebbi 在對方(…)停頓時忍住沒插話", gK.PauseHolds >= 1);
         }
 
         private static void T_Conversation()
@@ -426,6 +453,64 @@ namespace KebbiBrain
                 return DelayedListen(r);
             }
             private async Task<string> DelayedListen(string r) { await Task.Delay(ListenDelayMs); return r; }
+        }
+
+        // 決定式 LLM:端點判斷(system 含 JudgeTag)依「結尾標點」回 COMPLETE/INCOMPLETE;否則照腳本回台詞。
+        // 用來自測語意端點偵測(對應真機上的 Claude/Azure):句尾有句點/問號/驚嘆號=講完。
+        private sealed class EndpointJudgeLlm : ILlm
+        {
+            private readonly System.Collections.Generic.Queue<string> _replies;
+            private readonly string _fallback;
+            public int Judges, Replies;
+            public EndpointJudgeLlm(string[] replies, string fallback = "好的。")
+            { _replies = new System.Collections.Generic.Queue<string>(replies ?? new string[0]); _fallback = fallback; }
+            public Task<string> AskAsync(string system, string user)
+            {
+                if (system != null && system.Contains(App.ConversationGame.Persona.JudgeTag))
+                {
+                    Judges++;
+                    string u = (user ?? "").TrimEnd();
+                    bool complete = u.Length > 0 && "。！？!?.".IndexOf(u[u.Length - 1]) >= 0;
+                    return Task.FromResult(complete ? "COMPLETE" : "INCOMPLETE");
+                }
+                Replies++;
+                return Task.FromResult(_replies.Count > 0 ? _replies.Dequeue() : _fallback);
+            }
+        }
+
+        // 「虛擬空氣」:把一方 TTS 發的每段聲音,變成另一方 STT 的一個內容窗 + 一個尾端靜音窗。
+        // 用來在主控台端到端模擬「內容走空氣、無任何網路 turn 信號」的兩機聽說對話。
+        private sealed class VirtualAir
+        {
+            private readonly object _lock = new object();
+            private readonly System.Collections.Generic.Dictionary<string, System.Collections.Generic.Queue<string>> _inbox
+                = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.Queue<string>>();
+            public void Register(string who)
+            { lock (_lock) { if (!_inbox.ContainsKey(who)) _inbox[who] = new System.Collections.Generic.Queue<string>(); } }
+            public void Speak(string speaker, string text)
+            {
+                lock (_lock)
+                {
+                    foreach (var kv in _inbox)
+                        if (kv.Key != speaker) { kv.Value.Enqueue(text); kv.Value.Enqueue(""); } // 內容窗 + 尾端靜音
+                }
+            }
+            public string Listen(string listener)
+            {
+                lock (_lock)
+                { return _inbox.TryGetValue(listener, out var q) && q.Count > 0 ? q.Dequeue() : ""; }
+            }
+        }
+
+        // 接到 VirtualAir 的語音:SpeakAsync=對空氣發聲、ListenAsync=從空氣收(每窗 ListenDelayMs 讓並行 yield)。
+        private sealed class AirVoice : IVoice
+        {
+            private readonly VirtualAir _air; private readonly string _me;
+            public int ListenDelayMs = 5;
+            public readonly System.Collections.Generic.List<string> Spoken = new System.Collections.Generic.List<string>();
+            public AirVoice(VirtualAir air, string me) { _air = air; _me = me; _air.Register(me); }
+            public Task SpeakAsync(string text, string lang = "id-ID") { Spoken.Add(text); _air.Speak(_me, text); return Task.CompletedTask; }
+            public async Task<string> ListenAsync(string lang = "id-ID") { await Task.Delay(ListenDelayMs); return _air.Listen(_me); }
         }
 
         // 遠端機身控制:中控用 RemoteBodyProxy 經 link 驅動被控機(BodyCommandReceiver 套用到本機 body)。
