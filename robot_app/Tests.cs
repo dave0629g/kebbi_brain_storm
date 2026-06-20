@@ -61,6 +61,7 @@ namespace KebbiBrain
             T_G2_Validator();
             T_G2_TurnHead();
             T_GeminiRobotics();
+            T_GeminiLive();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -328,6 +329,44 @@ namespace KebbiBrain
 
             // 空回應不爆
             Check("RoboVision-空回應回空清單", Hardware.GeminiRoboticsProtocol.ParseDetections(null).Count == 0);
+        }
+
+        // Gemini Live API(即時語音對話)協定層:組 setup/音訊/文字 + 解析 server(免金鑰可驗)。
+        private static void T_GeminiLive()
+        {
+            string setup = App.GeminiLiveProtocol.BuildSetupJson("gemini-3.1-flash-live-preview", "你是凱比。");
+            Check("Live-setup 含 models/前綴與模型", setup.Contains("\"model\":\"models/gemini-3.1-flash-live-preview\""));
+            Check("Live-setup 回 AUDIO", setup.Contains("\"responseModalities\":[\"AUDIO\"]"));
+            Check("Live-setup 含 persona system", setup.Contains("systemInstruction") && setup.Contains("你是凱比。"));
+            Check("Live-setup 開原文+譯文逐字稿", setup.Contains("inputAudioTranscription") && setup.Contains("outputAudioTranscription"));
+
+            byte[] pcm = { 1, 2, 3, 4 };
+            string ac = App.GeminiLiveProtocol.BuildAudioChunkJson(pcm);
+            Check("Live-音訊 realtimeInput.audio + 16k mime", ac.Contains("\"realtimeInput\"") && ac.Contains("audio/pcm;rate=16000") && ac.Contains("AQIDBA=="));
+            Check("Live-文字輪 clientContent+turnComplete", App.GeminiLiveProtocol.BuildTextTurnJson("哈囉").Contains("clientContent") && App.GeminiLiveProtocol.BuildTextTurnJson("哈囉").Contains("turnComplete"));
+
+            // 解析:一則含音訊 + 譯文逐字稿的 serverContent
+            string sm = "{\"serverContent\":{\"modelTurn\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"audio/pcm;rate=24000\",\"data\":\"QUJDRA==\"}}]},\"outputTranscription\":{\"text\":\"哈囉,我是凱比\"}}}";
+            var m = App.GeminiLiveProtocol.TryParseServer(sm);
+            Check("Live-解析音訊 base64", m.AudioBase64 == "QUJDRA==");
+            Check("Live-解析 Kebbi 譯文逐字稿", m.OutputText == "哈囉,我是凱比");
+            var m2 = App.GeminiLiveProtocol.TryParseServer("{\"serverContent\":{\"inputTranscription\":{\"text\":\"你好\"},\"turnComplete\":true}}");
+            Check("Live-解析使用者原文+turnComplete", m2.InputText == "你好" && m2.TurnComplete);
+            Check("Live-解析 setupComplete", App.GeminiLiveProtocol.TryParseServer("{\"setupComplete\":{}}").SetupComplete);
+            Check("Live-解析 interrupted(barge-in)", App.GeminiLiveProtocol.TryParseServer("{\"serverContent\":{\"interrupted\":true}}").Interrupted);
+            // 跳脫引號的逐字稿
+            var m3 = App.GeminiLiveProtocol.TryParseServer("{\"serverContent\":{\"outputTranscription\":{\"text\":\"他說\\\"嗨\\\"喔\"}}}");
+            Check("Live-解析跳脫引號逐字稿", m3.OutputText == "他說\"嗨\"喔");
+
+            // PCM 轉換往返 + 重採樣
+            float[] f = { 0f, 0.5f, -0.5f, 1f };
+            byte[] buf = new byte[8];
+            int nb = App.GeminiLiveProtocol.FloatToPcm16(f, 4, buf);
+            float[] back = new float[4];
+            int ns = App.GeminiLiveProtocol.Pcm16ToFloat(buf, nb, back);
+            Check("Live-PCM16 往返(8 byte/4 sample)", nb == 8 && ns == 4 && Math.Abs(back[1] - 0.5f) < 0.001f && Math.Abs(back[2] + 0.5f) < 0.001f);
+            var rs = App.GeminiLiveProtocol.Resample(new float[] { 0, 1, 0, 1, 0, 1 }, 6, 24000, 16000);
+            Check("Live-重採樣 24k→16k 長度=2/3", rs.Length == 4);
         }
 
         private static void T_ConversationStt()
