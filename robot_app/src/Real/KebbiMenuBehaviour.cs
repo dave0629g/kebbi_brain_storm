@@ -9,6 +9,8 @@ namespace KebbiBrain.Real
     public sealed class KebbiMenuBehaviour : MonoBehaviour
     {
         public KebbiSecrets secrets;
+        public string counselorRulesJson = "";   // KebbiBuild 讀檔注入(供選單啟動輔導室)
+        public string counselorTopicsJson = "";
         private bool _launched;
         private string _note = "";
 
@@ -28,6 +30,7 @@ namespace KebbiBrain.Real
 
             _items = new[]
             {
+                new Item{ Label="輔導室陪伴機器人", Mode=KebbiAppBehaviour.Mode.Counselor, Lang="zh-TW", Name="凱比", Char="溫暖、穩、接得住的陪伴者", FullScreenUi=true },
                 new Item{ Label="即時語音對話(台灣中文)", Mode=KebbiAppBehaviour.Mode.LiveConversation, Lang="zh-TW", Name="凱比", Char="親切又有耐心的教育機器人", FullScreenUi=true },
                 new Item{ Label="視覺認物(Robotics-ER)", Mode=KebbiAppBehaviour.Mode.RoboticsVision, FullScreenUi=true },
                 new Item{ Label="印尼語方位遊戲(G4)", Mode=KebbiAppBehaviour.Mode.G4_TebakArah },
@@ -80,6 +83,8 @@ namespace KebbiBrain.Real
             if (!string.IsNullOrEmpty(it.Lang)) kab.personaLang = it.Lang;
             if (!string.IsNullOrEmpty(it.Name)) kab.personaName = it.Name;
             if (!string.IsNullOrEmpty(it.Char)) kab.personaCharacter = it.Char;
+            if (it.Mode == KebbiAppBehaviour.Mode.Counselor)   // 把烘進選單的輔導室設定檔傳給功能
+            { kab.counselorRulesJson = counselorRulesJson; kab.counselorTopicsJson = counselorTopicsJson; }
             if (!it.FullScreenUi) go.AddComponent<ScreenLogHud>(); // 沒有自己滿版 UI 的功能 → 加文字 HUD 看輸出
             Debug.Log("[Menu] 啟動功能: " + it.Mode);
             // KebbiAppBehaviour.Start 會自動跑該 Mode。

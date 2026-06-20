@@ -1,6 +1,5 @@
-// 輔導室會談協調器(整檔 #if !UNITY:Sim 階段)。串 ISafetyGate/IConversationLog/INotifyHuman/IExplorationPlanner
-// + 沿用 IKebbiBody/IVoice/ILlm。鐵律:每輪學生輸入先過確定性安全閘,只有 🟢 才呼叫 LLM(Propose-vs-Gate)。
-#if !UNITY
+// 輔導室會談協調器(全平台共用:不依賴 JSON/檔案/UnityEngine)。串 ISafetyGate/IConversationLog/INotifyHuman/
+// IExplorationPlanner + 沿用 IKebbiBody/IVoice/ILlm。鐵律:每輪先過確定性安全閘,只有🟢才呼叫 LLM(Propose-vs-Gate)。
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -89,9 +88,9 @@ namespace KebbiBrain.App.Counselor
                 return Layer.Yellow;
             }
 
-            // 🟢 才交給 LLM 生成陪聊回應(Propose)
+            // 🟢 才交給 LLM 生成陪聊回應(Propose);帶近幾輪脈絡讓陪聊連貫
             string reply;
-            try { reply = (await _llm.AskAsync(GreenSystem, studentText) ?? "").Trim(); }
+            try { reply = (await _llm.AskAsync(GreenSystem, GreenContext(studentText)) ?? "").Trim(); }
             catch { reply = ""; }
             if (reply.Length == 0) reply = "嗯,我在聽,你想多說一點嗎?";
             _log.Append(Speaker.Kebbi, _mode, reply, Layer.Green, LogEvent.None);
@@ -166,6 +165,19 @@ namespace KebbiBrain.App.Counselor
             return "";
         }
 
+        // 給🟢開放聊的 user 內容:近幾輪對話脈絡 + 這句,讓真 LLM 陪聊連貫。
+        private string GreenContext(string latest)
+        {
+            var turns = _log.GetTurns();
+            var sb = new System.Text.StringBuilder();
+            int start = turns.Count > 8 ? turns.Count - 8 : 0;
+            for (int i = start; i < turns.Count; i++)
+                if (!string.IsNullOrWhiteSpace(turns[i].Text))
+                    sb.Append(turns[i].Speaker == Speaker.Student ? "學生:" : "凱比:").Append(turns[i].Text).Append('\n');
+            sb.Append("學生:").Append(latest).Append("\n凱比:");
+            return sb.ToString();
+        }
+
         private void Speak(string text)
         {
             _out("   🤖 凱比" + (_mode == ConvMode.Silent ? "(螢幕)" : "") + ": " + text);
@@ -174,4 +186,3 @@ namespace KebbiBrain.App.Counselor
         }
     }
 }
-#endif

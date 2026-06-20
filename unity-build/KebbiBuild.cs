@@ -32,6 +32,7 @@ public static class KebbiBuild
     public static void BuildRoboticsVisionApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-robovision-arm64.apk", mode: KebbiAppBehaviour.Mode.RoboticsVision);
     public static void BuildLiveApk()       => Build(useRealRobotApi: false, apk: "Build/kebbi-live-arm64.apk", mode: KebbiAppBehaviour.Mode.LiveConversation);
     public static void BuildMenuApk()       => Build(useRealRobotApi: false, apk: "Build/kebbi-menu-arm64.apk", menu: true); // 功能選單:一個功能一個按鈕
+    public static void BuildCounselorApk()  => Build(useRealRobotApi: false, apk: "Build/kebbi-counselor-arm64.apk", mode: KebbiAppBehaviour.Mode.Counselor);
 
     private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah, bool menu = false)
     {
@@ -53,6 +54,8 @@ public static class KebbiBuild
         {
             var mb = go.AddComponent<KebbiBrain.Real.KebbiMenuBehaviour>();
             mb.secrets = InjectSecretsFromEnv();   // 🔐 注入金鑰;選單依使用者點選再跑各功能
+            ReadCounselorJson(out var cr, out var ct);   // 輔導室設定檔烘進選單(供啟動)
+            mb.counselorRulesJson = cr; mb.counselorTopicsJson = ct;
         }
         else { BuildModeScene(go, useRealRobotApi, mode); }
         EditorSceneManager.SaveScene(scene, scenePath);
@@ -101,9 +104,20 @@ public static class KebbiBuild
         kab.converseHuman = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_HUMAN") ?? "") == "1"; // 1=本機扮真人(測試替身)
         kab.converseGoal = System.Environment.GetEnvironmentVariable("KEBBI_CONV_GOAL") ?? "";            // 扮真人的目標(agenda 錨)
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
-        if (mode != KebbiAppBehaviour.Mode.RoboticsVision && mode != KebbiAppBehaviour.Mode.LiveConversation) // 視覺/Live:有自己的疊圖 → 不加會蓋畫面的 HUD
+        if (mode == KebbiAppBehaviour.Mode.Counselor)        // 輔導室:把設定檔 JSON 烘進場景
+        { ReadCounselorJson(out var cr, out var ct); kab.counselorRulesJson = cr; kab.counselorTopicsJson = ct; }
+        if (mode != KebbiAppBehaviour.Mode.RoboticsVision && mode != KebbiAppBehaviour.Mode.LiveConversation && mode != KebbiAppBehaviour.Mode.Counselor) // 視覺/Live/輔導室:有自己的疊圖 → 不加會蓋畫面的 HUD
             go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
     }
+
+    // 讀輔導室設定檔(symlink 到 robot_app/src/App/Counselor 的 JSON),build 時烘進場景。
+    private static void ReadCounselorJson(out string rules, out string topics)
+    {
+        rules = ReadFileIf("Assets/Scripts/App/Counselor/counselor_safety_rules.json");
+        topics = ReadFileIf("Assets/Scripts/App/Counselor/counselor_topics.json");
+        Debug.Log($"[Counselor] 設定檔注入 rules len={rules.Length} topics len={topics.Length}");
+    }
+    private static string ReadFileIf(string p) => System.IO.File.Exists(p) ? System.IO.File.ReadAllText(p) : "";
 
     // 從環境變數注入金鑰到 KebbiSecrets.asset。回傳該 asset(指派給 KebbiAppBehaviour.secrets)。
     // ⚠️ 只讀 env、只印長度,絕不 Log 金鑰值。asset 不存在則建立。

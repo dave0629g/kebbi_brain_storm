@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -46,6 +46,10 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     public bool converseHuman = false;                  // true=本機「扮演真人」(ConverseStt 測試替身:反 assistant、會遲疑停頓)
     public string converseGoal = "";                    // 扮真人時的目標(agenda 錨;空=泛聊)
 
+    [Header("輔導室 Counselor(build 時注入設定檔 JSON)")]
+    [TextArea] public string counselorRulesJson = "";   // counselor_safety_rules.json 內容(KebbiBuild 讀檔注入)
+    [TextArea] public string counselorTopicsJson = "";  // counselor_topics.json 內容
+
     private readonly CancellationTokenSource _life = new CancellationTokenSource();
     private UnityRobotLink _link;
 
@@ -68,6 +72,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.ConverseStt: await RunConverseSttAsync(); break;
             case Mode.RoboticsVision: RunRoboticsVision(); break;
             case Mode.LiveConversation: RunLiveConversation(); break;
+            case Mode.Counselor: RunCounselor(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -216,6 +221,17 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
                   " 用語意端點偵測判對方講完沒(不靠網路 token)," +
                   (converseStarter ? "我先開口" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
         await game.RunAsync(converseStarter, maxTurns: 0);
+    }
+
+    // ── 輔導室陪伴機器人:安全閘三層分級 + 真 LLM 開放聊 + 有聲/無聲 + 逐句記錄 + 交接卡(掛 behaviour 自跑) ──
+    private void RunCounselor()
+    {
+        var go = new GameObject("Counselor");
+        var c = go.AddComponent<CounselorBehaviour>();
+        c.rulesJson = counselorRulesJson;
+        c.topicsJson = counselorTopicsJson;
+        c.personaName = string.IsNullOrEmpty(personaName) ? "凱比" : personaName;
+        Debug.Log("[Counselor] 啟動輔導室陪伴(rules len=" + (counselorRulesJson ?? "").Length + ", topics len=" + (counselorTopicsJson ?? "").Length + ")");
     }
 
     // ── Gemini Live API 即時語音對話:對著手機講話 → Kebbi 語音回 + 雙語字幕(掛 behaviour 自跑) ──
