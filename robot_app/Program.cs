@@ -52,6 +52,7 @@ namespace KebbiBrain
             if (Array.IndexOf(args, "--g2h") >= 0) { await PlayG2TurnHeadDemoAsync(); return 0; }
 
 #if !UNITY
+            if (Array.IndexOf(args, "--counselor") >= 0) { await App.Counselor.CounselorDemo.RunAsync(); return 0; }
             if (cloudTest) return await Cloud.CloudCheck.RunAsync(Console.WriteLine);
 #endif
 

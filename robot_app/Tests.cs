@@ -62,6 +62,7 @@ namespace KebbiBrain
             T_G2_TurnHead();
             T_GeminiRobotics();
             T_GeminiLive();
+            T_Counselor();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -332,6 +333,109 @@ namespace KebbiBrain
         }
 
         // Gemini Live API(即時語音對話)協定層:組 setup/音訊/文字 + 解析 server(免金鑰可驗)。
+        private sealed class FakeGreenLlm : ILlm
+        {
+            public Task<string> AskAsync(string system, string user) => Task.FromResult("嗯,我懂,你想多說一點嗎?");
+        }
+
+        // 輔導室陪伴機器人:確定性安全閘三層分級 + 探索 + 逐句記錄 + 交接卡 + 通知。免金鑰、決定式。
+        private static void T_Counselor()
+        {
+            Action<string> noop = _ => { };
+            var gate = new App.Counselor.SimSafetyGate();   // 從輸出目錄的 counselor_safety_rules.json 載入
+
+            // 三層分流
+            Check("輔導-🟢 生涯資訊詢問=Green", gate.Evaluate("我以後想當獸醫,想多了解一下").Layer == App.Counselor.Layer.Green);
+            Check("輔導-🟡 家庭長期衝突=Yellow", gate.Evaluate("我爸媽一直吵架,我回家都不想講話").Layer == App.Counselor.Layer.Yellow);
+            Check("輔導-🔴 自傷自殺=Red", gate.Evaluate("我想死").Layer == App.Counselor.Layer.Red);
+            Check("輔導-🔴蓋🟡(同時命中取最高)", gate.Evaluate("升學壓力大到覺得活著沒意義").Layer == App.Counselor.Layer.Red);
+
+            // 安全清單每一個紅線關鍵字/片語都觸發 🔴(對應驗收『清單每個關鍵字都觸發🔴』)
+            int redN = 0, redFail = 0;
+            foreach (var r in gate.Rules)
+            {
+                if (r.Layer != App.Counselor.Layer.Red) continue;
+                foreach (var kw in r.Keywords) { if (string.IsNullOrEmpty(kw)) continue; redN++; if (gate.Evaluate(kw).Layer != App.Counselor.Layer.Red) { redFail++; if (redFail <= 5) Console.WriteLine("   ⚠ 紅線漏(kw):" + kw); } }
+                foreach (var ph in r.Phrases) { if (string.IsNullOrEmpty(ph)) continue; redN++; if (gate.Evaluate(ph).Layer != App.Counselor.Layer.Red) { redFail++; if (redFail <= 5) Console.WriteLine("   ⚠ 紅線漏(ph):" + ph); } }
+            }
+            Check($"輔導-紅線清單每個詞都觸發🔴(共 {redN} 項)", redN > 100 && redFail == 0);
+
+            // 邊界/模糊一律往上靠(寧可誤報不可漏報)
+            string[] amb = { "活著好累", "不想撐了", "有人一直弄我", "好想消失", "我把喜歡的東西都送給朋友了想道別", "覺得活著好像沒什麼意義", "不如消失算了" };
+            bool ambOk = true;
+            foreach (var s in amb) { var r = gate.Evaluate(s); if (!(r.Layer >= App.Counselor.Layer.Yellow && (r.Layer == App.Counselor.Layer.Red || r.EscalatedByAmbiguity))) { ambOk = false; Console.WriteLine("   ⚠ 邊界沒往上靠:" + s + "→" + r.Layer); } }
+            Check("輔導-邊界模糊一律往上靠(寧可誤報)", ambOk);
+
+            // 探索:不重複、覆蓋全地景、全試完回 null
+            var planner = new App.Counselor.SimExplorationPlanner();
+            var ids = new System.Collections.Generic.List<string>();
+            App.Counselor.TopicProbe tp; int guard = 0;
+            while ((tp = planner.NextTopic()) != null && guard++ < 50) ids.Add(tp.Id);
+            Check("輔導-探索不重複+覆蓋全地景+最後null",
+                ids.Count == planner.Landscape.Count && new System.Collections.Generic.HashSet<string>(ids).Count == ids.Count && planner.NextTopic() == null);
+            // 開場語輪替(換方向不換句重講)
+            var p2 = new App.Counselor.SimExplorationPlanner();
+            var f1 = p2.NextTopic(); string op1 = f1.OpenerLine, id1 = f1.Id;
+            p2.Reset();
+            var f2 = p2.NextTopic();
+            Check("輔導-開場語輪替(同話題不換句重講)", f2.Id == id1 && f2.OpenerLine != op1);
+
+            // 逐句記錄:append-only、TurnIndex 連續、時間非遞減、快照改寫不影響內部
+            int tick = 0; Func<DateTime> clock = () => new DateTime(2026, 6, 20, 9, 0, 0).AddSeconds(tick++);
+            var log = new App.Counselor.SimConversationLog("TL", clock);
+            log.Append(App.Counselor.Speaker.Student, App.Counselor.ConvMode.Voice, "a", App.Counselor.Layer.Green, App.Counselor.LogEvent.None);
+            log.Append(App.Counselor.Speaker.Kebbi, App.Counselor.ConvMode.Voice, "b", App.Counselor.Layer.Green, App.Counselor.LogEvent.None);
+            var turns = log.GetTurns();
+            Check("輔導-逐句TurnIndex連續遞增", turns[0].TurnIndex == 0 && turns[1].TurnIndex == 1);
+            Check("輔導-逐句時間非遞減", turns[1].Timestamp >= turns[0].Timestamp);
+            var snap = (App.Counselor.LogTurn[])log.GetTurns(); snap[0] = null;  // 改寫快照
+            Check("輔導-快照改寫不影響內部(不可竄改)", log.GetTurns()[0] != null && log.GetTurns().Count == 2);
+
+            // 串接會談:登入告知 → 綠 → 黃(交接卡)→ 紅(呼叫真人+停)
+            var glog = new App.Counselor.SimConversationLog("TS", clock);
+            var notify = new App.Counselor.SimNotifyHuman(noop);
+            int humanCalled = 0; notify.OnHumanCalled += _ => humanCalled++;
+            var sess = new App.Counselor.CounselorSession(null, null, new FakeGreenLlm(), gate, glog, notify, new App.Counselor.SimExplorationPlanner(), noop);
+            sess.Start("學生A", App.Counselor.ConvMode.Voice);
+            Check("輔導-登入即告知會記錄+給老師",
+                glog.GetTurns()[0].Event == App.Counselor.LogEvent.Login && glog.GetTurns()[0].Text.Contains("記錄") && glog.GetTurns()[0].Text.Contains("輔導老師"));
+            sess.StepAsync("今天還好,在等老師").Wait(2000);                  // 🟢
+            sess.StepAsync("最近家裡氣氛很差,爸媽一直吵架").Wait(2000);      // 🟡
+            var yc = notify.YellowQueue[notify.YellowQueue.Count - 1];
+            Check("輔導-🟡 交接卡欄位完整",
+                yc.Dimensions.Length > 0 && !string.IsNullOrEmpty(yc.MainConcern) && !string.IsNullOrEmpty(yc.EmotionState) && yc.KeyPoints.Length > 0 && !string.IsNullOrEmpty(yc.LogLink));
+            Check("輔導-交接卡JSON首欄=safety_flag", yc.ToJson().StartsWith("{\"safety_flag\""));
+            int beforeRedTurns = glog.GetTurns().Count;
+            sess.StepAsync("我撐不下去了,想結束自己的生命").Wait(2000);      // 🔴
+            Check("輔導-🔴 即時呼叫真人(剛好一次)", humanCalled == 1 && notify.CalledHuman.Count == 1 && notify.CalledHuman[0].SafetyFlag == App.Counselor.SafetyFlag.High);
+            bool hasRedEsc = false; foreach (var t in glog.GetTurns()) if (t.Event == App.Counselor.LogEvent.RedEscalation) hasRedEsc = true;
+            Check("輔導-🔴 log標記RedEscalation", hasRedEsc);
+            Check("輔導-🔴 後session結束", sess.Ended);
+            int afterRedTurns = glog.GetTurns().Count;
+            sess.StepAsync("還想再聊").Wait(2000);     // 已結束 → 不再續一般對話
+            sess.ProbeAsync().Wait(2000);              // 探索只在🟢 → 紅線後不探索
+            Check("輔導-🔴 後不再續一般對話+停探索", glog.GetTurns().Count == afterRedTurns);
+
+            // 有聲/無聲三層一致(同輸入序列,層級相同)
+            string[] seq = { "今天還可以", "最近家裡爸媽一直冷戰", "後來去打球還不錯" };
+            var lv = RunCounselorLayers(gate, App.Counselor.ConvMode.Voice, seq);
+            var ls = RunCounselorLayers(gate, App.Counselor.ConvMode.Silent, seq);
+            bool modeSame = lv.Count == ls.Count; for (int i = 0; modeSame && i < lv.Count; i++) if (lv[i] != ls[i]) modeSame = false;
+            Check("輔導-有聲/無聲三層分級一致", modeSame && lv.Count == 3);
+        }
+
+        private static System.Collections.Generic.List<App.Counselor.Layer> RunCounselorLayers(App.Counselor.ISafetyGate gate, App.Counselor.ConvMode mode, string[] inputs)
+        {
+            Action<string> noop = _ => { };
+            int tick = 0; Func<DateTime> clock = () => new DateTime(2026, 6, 20, 10, 0, 0).AddSeconds(tick++);
+            var sess = new App.Counselor.CounselorSession(null, null, new FakeGreenLlm(), gate,
+                new App.Counselor.SimConversationLog("M" + (int)mode, clock), new App.Counselor.SimNotifyHuman(noop), new App.Counselor.SimExplorationPlanner(), noop);
+            sess.Start("學生", mode);
+            var layers = new System.Collections.Generic.List<App.Counselor.Layer>();
+            foreach (var s in inputs) layers.Add(sess.StepAsync(s).GetAwaiter().GetResult());
+            return layers;
+        }
+
         private static void T_GeminiLive()
         {
             string setup = App.GeminiLiveProtocol.BuildSetupJson("gemini-3.1-flash-live-preview", "你是凱比。");

@@ -14,4 +14,16 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- 輔導室設定檔(安全規則/話題地景)複製到輸出,SimSafetyGate/SimExplorationPlanner 執行期讀取。 -->
+  <ItemGroup>
+    <Content Include="src/App/Counselor/counselor_safety_rules.json">
+      <Link>counselor_safety_rules.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="src/App/Counselor/counselor_topics.json">
+      <Link>counselor_topics.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
