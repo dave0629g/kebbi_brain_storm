@@ -29,6 +29,7 @@ public static class KebbiBuild
     public static void BuildG2DirectorApk() => Build(useRealRobotApi: false, apk: "Build/kebbi-g2director-arm64.apk", mode: KebbiAppBehaviour.Mode.G2Director);
     public static void BuildConverseApk()   => Build(useRealRobotApi: false, apk: "Build/kebbi-converse-arm64.apk", mode: KebbiAppBehaviour.Mode.Converse);
     public static void BuildConverseSttApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-conversestt-arm64.apk", mode: KebbiAppBehaviour.Mode.ConverseStt);
+    public static void BuildRoboticsVisionApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-robovision-arm64.apk", mode: KebbiAppBehaviour.Mode.RoboticsVision);
 
     private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
     {
@@ -103,6 +104,9 @@ public static class KebbiBuild
         }
         s.speechKey = Environment.GetEnvironmentVariable("KEBBI_SPEECH_KEY") ?? "";
         s.llmKey = Environment.GetEnvironmentVariable("KEBBI_LLM_KEY") ?? "";
+        s.geminiKey = Environment.GetEnvironmentVariable("KEBBI_GEMINI_KEY") ?? "";   // Gemini 視覺/Live(同一把)
+        var gvm = Environment.GetEnvironmentVariable("KEBBI_GEMINI_MODEL");
+        if (!string.IsNullOrEmpty(gvm)) s.geminiVisionModel = gvm;
         var region = Environment.GetEnvironmentVariable("KEBBI_SPEECH_REGION");
         if (!string.IsNullOrEmpty(region)) s.speechRegion = region;
         var voice = Environment.GetEnvironmentVariable("KEBBI_SPEECH_VOICE");
@@ -111,7 +115,7 @@ public static class KebbiBuild
         if (!string.IsNullOrEmpty(provider)) s.llmProvider = provider;
         EditorUtility.SetDirty(s);
         AssetDatabase.SaveAssets();
-        Debug.Log($"[Secrets] injected from env (speechKey len={s.speechKey.Length}, llmKey len={s.llmKey.Length}, region={s.speechRegion}) — values NOT logged");
+        Debug.Log($"[Secrets] injected from env (speechKey len={s.speechKey.Length}, llmKey len={s.llmKey.Length}, geminiKey len={s.geminiKey.Length}, region={s.speechRegion}) — values NOT logged");
         if (s.speechKey.Length == 0 && s.llmKey.Length == 0)
             Debug.LogWarning("[Secrets] env 無金鑰 → APK 將無雲端語音/LLM(先 export KEBBI_SPEECH_KEY/KEBBI_LLM_KEY 再 build)");
         return s;
@@ -125,6 +129,7 @@ public static class KebbiBuild
         s.speechKey = "";
         s.llmKey = "";
         s.llmProvider = "";
+        s.geminiKey = "";
         EditorUtility.SetDirty(s);
         AssetDatabase.SaveAssets();
         Debug.Log("[Secrets] asset cleared (no key persisted on disk)");

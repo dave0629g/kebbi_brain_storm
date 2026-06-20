@@ -60,6 +60,7 @@ namespace KebbiBrain
             T_G3_Frame();
             T_G2_Validator();
             T_G2_TurnHead();
+            T_GeminiRobotics();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -296,6 +297,37 @@ namespace KebbiBrain
             Check("Persona-中文 system 帶角色名", zh.SystemPrompt().Contains("小明"));
             Check("Persona-印尼語開場為印尼語", id.OpeningUser().Contains("percakapan"));
             Check("Persona-中文開場為中文", zh.OpeningUser().Contains("對話"));
+        }
+
+        // Gemini Robotics-ER 視覺:組請求 + 解析回應(純 C#,免金鑰可驗)。
+        private static void T_GeminiRobotics()
+        {
+            // 端點 + 請求 body
+            string ep = Hardware.GeminiRoboticsProtocol.Endpoint("gemini-robotics-er-1.6-preview", "KEY123");
+            Check("RoboVision-端點含模型與key", ep.Contains("models/gemini-robotics-er-1.6-preview:generateContent") && ep.EndsWith("key=KEY123"));
+            string body = Hardware.GeminiRoboticsProtocol.BuildRequestBody("QUJD", "找出杯子");
+            Check("RoboVision-body 含 inline_data/jpeg", body.Contains("\"inline_data\"") && body.Contains("image/jpeg") && body.Contains("\"QUJD\""));
+            Check("RoboVision-body 含 prompt 文字", body.Contains("找出杯子"));
+
+            // 解析「整個 generateContent 回應」(text 內含被跳脫的 JSON 陣列)
+            string resp = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"[{\\\"label\\\":\\\"筆\\\",\\\"point\\\":[258,97],\\\"box_2d\\\":[230,80,290,120]},{\\\"label\\\":\\\"杯子\\\",\\\"point\\\":[500,600]}]\"}]}}]}";
+            var dets = Hardware.GeminiRoboticsProtocol.ParseDetections(resp);
+            Check("RoboVision-解析出 2 個物體", dets.Count == 2);
+            Check("RoboVision-第1個=筆 有point有box", dets.Count > 0 && dets[0].Label == "筆" && dets[0].HasPoint && dets[0].HasBox);
+            Check("RoboVision-筆 point=[258,97](y,x)", dets.Count > 0 && (int)dets[0].Y == 258 && (int)dets[0].X == 97);
+            Check("RoboVision-筆 box ymin/xmax 正確", dets.Count > 0 && (int)dets[0].Ymin == 230 && (int)dets[0].Xmax == 120);
+            Check("RoboVision-第2個=杯子 只有point", dets.Count > 1 && dets[1].Label == "杯子" && dets[1].HasPoint && !dets[1].HasBox);
+
+            // 容錯:markdown fenced + 純文字陣列也能解析
+            var d2 = Hardware.GeminiRoboticsProtocol.ParseDetections("```json\n[{\"label\":\"球\",\"point\":[10,20]}]\n```");
+            Check("RoboVision-容錯 fenced 純文字", d2.Count == 1 && d2[0].Label == "球");
+
+            // 抽模型文字
+            string txt = Hardware.GeminiRoboticsProtocol.ExtractModelText(resp);
+            Check("RoboVision-抽出模型文字含 label", txt.Contains("label") && txt.Contains("筆"));
+
+            // 空回應不爆
+            Check("RoboVision-空回應回空清單", Hardware.GeminiRoboticsProtocol.ParseDetections(null).Count == 0);
         }
 
         private static void T_ConversationStt()

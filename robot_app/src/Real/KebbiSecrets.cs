@@ -27,6 +27,10 @@ namespace KebbiBrain.Real
         public string openAiModel = "gpt-4o-mini";
         public string anthropicModel = "claude-opus-4-8";
 
+        [Header("Gemini(視覺 Robotics-ER;之後 Live API 也用同一把)")]
+        public string geminiKey = "";
+        public string geminiVisionModel = "gemini-robotics-er-1.6-preview";
+
         // 把設定推入靜態 Config(KebbiFactory 會讀 Config 建立 Real 後端)。
         public void ApplyToConfig()
         {
@@ -37,6 +41,8 @@ namespace KebbiBrain.Real
             if (!string.IsNullOrEmpty(llmProvider)) Config.LlmProvider = llmProvider;
             if (!string.IsNullOrEmpty(openAiModel)) Config.OpenAiModel = openAiModel;
             if (!string.IsNullOrEmpty(anthropicModel)) Config.LlmModel = anthropicModel;
+            if (!string.IsNullOrEmpty(geminiKey)) Config.GeminiKey = geminiKey;
+            if (!string.IsNullOrEmpty(geminiVisionModel)) Config.GeminiVisionModel = geminiVisionModel;
         }
     }
 }

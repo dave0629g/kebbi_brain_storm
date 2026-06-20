@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -66,6 +66,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.Controlled: RunControlled(); break;
             case Mode.Converse: await RunConverseAsync(); break;
             case Mode.ConverseStt: await RunConverseSttAsync(); break;
+            case Mode.RoboticsVision: RunRoboticsVision(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -214,6 +215,17 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
                   " 用語意端點偵測判對方講完沒(不靠網路 token)," +
                   (converseStarter ? "我先開口" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
         await game.RunAsync(converseStarter, maxTurns: 0);
+    }
+
+    // ── Gemini Robotics-ER 視覺:開相機 → 認物/指認 → 螢幕框出(掛 RoboticsVisionBehaviour 自跑) ──
+    private void RunRoboticsVision()
+    {
+        var go = new GameObject("RoboVision");
+        var rv = go.AddComponent<RoboticsVisionBehaviour>();
+        rv.apiKey = Config.GeminiKey;
+        rv.model = string.IsNullOrEmpty(Config.GeminiVisionModel)
+                 ? KebbiBrain.Hardware.GeminiRoboticsProtocol.DefaultModel : Config.GeminiVisionModel;
+        Debug.Log("[RoboVision] 啟動 Gemini Robotics-ER 視覺(geminiKey len=" + (Config.GeminiKey ?? "").Length + ")");
     }
 
     // peerIp 欄位("1.2.3.4" 或逗號分隔多台)→ 去空白/空項的陣列;空則回 null(純廣播)。

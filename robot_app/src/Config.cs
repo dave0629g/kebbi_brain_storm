@@ -26,6 +26,10 @@ namespace KebbiBrain
         public static string LlmModel = "claude-opus-4-8";              // Anthropic 用(可改 claude-haiku-4-5)
         public static string OpenAiModel = "gpt-4o-mini";              // OpenAI 用(可改 gpt-4o)
 
+        // Gemini(視覺 Robotics-ER;之後 Live API 也用同一把 key)。
+        public static string GeminiKey = Env("KEBBI_GEMINI_KEY");
+        public static string GeminiVisionModel = "gemini-robotics-er-1.6-preview"; // 視覺認物/指認/座標
+
         private static string Env(string k) => Environment.GetEnvironmentVariable(k) ?? "";
 
         // 依語言挑 Azure 語音。原本只有單一 SpeechVoice(印尼語),但 G1/G2/G3/G5 講中文(zh-TW)、只有 G4 講印尼語(id-ID)

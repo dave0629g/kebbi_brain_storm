@@ -26,6 +26,7 @@ case "${1:-middleware}" in
   g2director) METHOD="KebbiBuild.BuildG2DirectorApk" ;; # G2 分散式中控(甲機機身 BC| 給遠端;乙機語音本機)
   converse)   METHOD="KebbiBuild.BuildConverseApk" ;;   # 兩台印尼語對話(各 persona,文字直送交棒)
   conversestt) METHOD="KebbiBuild.BuildConverseSttApk" ;; # Kebbi↔真人:麥克風聽+STT→語意端點偵測→LLM→TTS(不靠網路 token;第二台設 KEBBI_CONV_HUMAN=1 扮真人)
+  robovision) METHOD="KebbiBuild.BuildRoboticsVisionApk" ;; # Gemini Robotics-ER 視覺:相機→認物/指認→螢幕框出(需 KEBBI_GEMINI_KEY)
   verify)     METHOD="KebbiBuild.VerifySecretsRoundTrip" ;;
   *) echo "用法: $0 [middleware|real|linkping|verify]"; exit 2 ;;
 esac
