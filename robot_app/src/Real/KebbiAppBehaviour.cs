@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -67,6 +67,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.Converse: await RunConverseAsync(); break;
             case Mode.ConverseStt: await RunConverseSttAsync(); break;
             case Mode.RoboticsVision: RunRoboticsVision(); break;
+            case Mode.LiveConversation: RunLiveConversation(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -215,6 +216,21 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
                   " 用語意端點偵測判對方講完沒(不靠網路 token)," +
                   (converseStarter ? "我先開口" : "先聽") + "(兩台請擺近、麥克風對喇叭)");
         await game.RunAsync(converseStarter, maxTurns: 0);
+    }
+
+    // ── Gemini Live API 即時語音對話:對著手機講話 → Kebbi 語音回 + 雙語字幕(掛 behaviour 自跑) ──
+    private void RunLiveConversation()
+    {
+        var go = new GameObject("GeminiLive");
+        var live = go.AddComponent<GeminiLiveConversationBehaviour>();
+        live.apiKey = Config.GeminiKey;
+        live.model = string.IsNullOrEmpty(Config.GeminiLiveModel) ? KebbiBrain.App.GeminiLiveProtocol.DefaultModel : Config.GeminiLiveModel;
+        // 用對話 persona 欄位組 system instruction(沿用 Converse 的 personaName/Character/Lang)。
+        bool zh = (personaLang ?? "").StartsWith("zh");
+        live.systemInstruction = zh
+            ? $"你是{personaName}。{personaCharacter} 只用「繁體中文(台灣用語)」講話,每次一兩句、簡短自然、會鼓勵小朋友。"
+            : $"Kamu adalah {personaName}. {personaCharacter} Bicara dalam Bahasa Indonesia, singkat dan natural.";
+        Debug.Log("[Live] 啟動 Gemini Live 對話(" + live.model + ",geminiKey len=" + (Config.GeminiKey ?? "").Length + ")");
     }
 
     // ── Gemini Robotics-ER 視覺:開相機 → 認物/指認 → 螢幕框出(掛 RoboticsVisionBehaviour 自跑) ──

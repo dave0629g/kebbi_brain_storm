@@ -30,6 +30,7 @@ public static class KebbiBuild
     public static void BuildConverseApk()   => Build(useRealRobotApi: false, apk: "Build/kebbi-converse-arm64.apk", mode: KebbiAppBehaviour.Mode.Converse);
     public static void BuildConverseSttApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-conversestt-arm64.apk", mode: KebbiAppBehaviour.Mode.ConverseStt);
     public static void BuildRoboticsVisionApk()=> Build(useRealRobotApi: false, apk: "Build/kebbi-robovision-arm64.apk", mode: KebbiAppBehaviour.Mode.RoboticsVision);
+    public static void BuildLiveApk()       => Build(useRealRobotApi: false, apk: "Build/kebbi-live-arm64.apk", mode: KebbiAppBehaviour.Mode.LiveConversation);
 
     private static void Build(bool useRealRobotApi, string apk, KebbiAppBehaviour.Mode mode = KebbiAppBehaviour.Mode.G4_TebakArah)
     {
@@ -67,7 +68,7 @@ public static class KebbiBuild
         kab.converseHuman = (System.Environment.GetEnvironmentVariable("KEBBI_CONV_HUMAN") ?? "") == "1"; // 1=本機扮真人(測試替身)
         kab.converseGoal = System.Environment.GetEnvironmentVariable("KEBBI_CONV_GOAL") ?? "";            // 扮真人的目標(agenda 錨)
         kab.secrets = InjectSecretsFromEnv();  // 🔐 從 env 注入金鑰、指派給場景(build 時打包進 APK)
-        if (mode != KebbiAppBehaviour.Mode.RoboticsVision)                 // 視覺模式:HUD 會蓋住相機畫面 → 不加
+        if (mode != KebbiAppBehaviour.Mode.RoboticsVision && mode != KebbiAppBehaviour.Mode.LiveConversation) // 視覺/Live:有自己的疊圖 → 不加會蓋畫面的 HUD
             go.AddComponent<KebbiBrain.Real.ScreenLogHud>(); // 螢幕文字 HUD:即時顯示狀態與收/送(鏡像 Debug.Log)
         EditorSceneManager.SaveScene(scene, scenePath);
 
@@ -108,6 +109,8 @@ public static class KebbiBuild
         s.geminiKey = Environment.GetEnvironmentVariable("KEBBI_GEMINI_KEY") ?? "";   // Gemini 視覺/Live(同一把)
         var gvm = Environment.GetEnvironmentVariable("KEBBI_GEMINI_MODEL");
         if (!string.IsNullOrEmpty(gvm)) s.geminiVisionModel = gvm;
+        var glm = Environment.GetEnvironmentVariable("KEBBI_GEMINI_LIVE_MODEL");
+        if (!string.IsNullOrEmpty(glm)) s.geminiLiveModel = glm;
         var region = Environment.GetEnvironmentVariable("KEBBI_SPEECH_REGION");
         if (!string.IsNullOrEmpty(region)) s.speechRegion = region;
         var voice = Environment.GetEnvironmentVariable("KEBBI_SPEECH_VOICE");
