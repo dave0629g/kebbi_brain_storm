@@ -28,11 +28,11 @@ namespace KebbiBrain.Real
 
             _items = new[]
             {
-                new Item{ Label="🎙️  即時語音對話(台灣中文)", Mode=KebbiAppBehaviour.Mode.LiveConversation, Lang="zh-TW", Name="凱比", Char="親切又有耐心的教育機器人", FullScreenUi=true },
-                new Item{ Label="👁️  視覺認物(Robotics-ER)", Mode=KebbiAppBehaviour.Mode.RoboticsVision, FullScreenUi=true },
-                new Item{ Label="🧭  印尼語方位遊戲(G4)", Mode=KebbiAppBehaviour.Mode.G4_TebakArah },
-                new Item{ Label="💬  兩台對話 · STT 端點(需兩台)", Mode=KebbiAppBehaviour.Mode.ConverseStt, Lang="zh-TW", Name="凱比", Char="親切", Note="這個要兩支手機" },
-                new Item{ Label="🗣️  兩台對話 · 文字交棒(需兩台)", Mode=KebbiAppBehaviour.Mode.Converse, Lang="zh-TW", Name="凱比", Char="親切", Note="這個要兩支手機" },
+                new Item{ Label="即時語音對話(台灣中文)", Mode=KebbiAppBehaviour.Mode.LiveConversation, Lang="zh-TW", Name="凱比", Char="親切又有耐心的教育機器人", FullScreenUi=true },
+                new Item{ Label="視覺認物(Robotics-ER)", Mode=KebbiAppBehaviour.Mode.RoboticsVision, FullScreenUi=true },
+                new Item{ Label="印尼語方位遊戲(G4)", Mode=KebbiAppBehaviour.Mode.G4_TebakArah },
+                new Item{ Label="兩台對話 · STT 端點(需兩台)", Mode=KebbiAppBehaviour.Mode.ConverseStt, Lang="zh-TW", Name="凱比", Char="親切", Note="這個要兩支手機" },
+                new Item{ Label="兩台對話 · 文字交棒(需兩台)", Mode=KebbiAppBehaviour.Mode.Converse, Lang="zh-TW", Name="凱比", Char="親切", Note="這個要兩支手機" },
             };
         }
 
