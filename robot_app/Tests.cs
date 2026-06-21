@@ -67,6 +67,7 @@ namespace KebbiBrain
             T_RoboGuide();
             T_CloudRetry();
             T_CounselorHandoff();
+            T_Vad();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -264,6 +265,50 @@ namespace KebbiBrain
             notify.OnSummary += _ => summ++;
             notify.CallHumanNow(card); notify.QueueYellowCard(card); notify.SendSessionSummary(card);
             Check("通知事件:Red/Yellow/Summary 各觸發一次", red == 1 && yellow == 1 && summ == 1);
+        }
+
+        // STT 動態錄音窗:RMS + VadEndpointer 端點偵測(合成 PCM,純狀態機)。
+        private static void T_Vad()
+        {
+            Console.WriteLine("\n— T_Vad:STT 動態錄音窗(語音端點)—");
+
+            // RMS
+            Check("Rms 全靜音→0", VadMath.Rms(new float[1600]) < 1e-6f);
+            var full = new float[1600]; for (int i = 0; i < full.Length; i++) full[i] = 1f;
+            Check("Rms 全幅1.0→~1", Math.Abs(VadMath.Rms(full) - 1f) < 1e-4f);
+            var half = new float[1600]; for (int i = 0; i < half.Length; i++) half[i] = 0.5f;
+            Check("Rms 0.5常值→0.5", Math.Abs(VadMath.Rms(half) - 0.5f) < 1e-4f);
+
+            // 全靜音 → 錄到硬上限(12000ms)才收
+            var v1 = new VadEndpointer();
+            int g1 = 0; while (!v1.Feed(0f, 100) && g1 < 1000) g1++;
+            Check("全靜音→硬上限12000ms收窗", v1.ElapsedMs == 12000);
+
+            // 講話1000ms後靜音 → 尾靜音700ms提早收窗(共1700ms)
+            var v2 = new VadEndpointer();
+            bool ended = false;
+            for (int i = 0; i < 10 && !ended; i++) ended = v2.Feed(0.1f, 100);
+            Check("語音期間不收窗", !ended);
+            for (int i = 0; i < 20 && !ended; i++) ended = v2.Feed(0f, 100);
+            Check("語音後靜音700ms→提早收窗(1700ms)", ended && v2.ElapsedMs == 1700);
+
+            // 短噪音(<minSpeech 300ms)→ 不當語音、不提早收 → 到硬上限
+            var v3 = new VadEndpointer();
+            v3.Feed(0.2f, 100); v3.Feed(0.2f, 100);
+            int g3 = 2; bool e3 = false; while (!e3 && g3 < 1000) { e3 = v3.Feed(0f, 100); g3++; }
+            Check("短噪音(<minSpeech)不提早收→硬上限", v3.ElapsedMs == 12000);
+
+            // 連續講話無尾靜音 → 到硬上限
+            var v4 = new VadEndpointer();
+            int g4 = 0; bool e4 = false; while (!e4 && g4 < 1000) { e4 = v4.Feed(0.1f, 100); g4++; }
+            Check("連續講話無尾靜音→硬上限(且 SawSpeech)", v4.ElapsedMs == 12000 && v4.SawSpeech);
+
+            // 最短窗:尾靜音條件在 minWindow 前達成也不提早收
+            var v5 = new VadEndpointer(silenceRms: 0.012f, minSpeechMs: 100, trailingSilenceMs: 100, maxWindowMs: 12000, minWindowMs: 600);
+            v5.Feed(0.1f, 100);   // 100ms 語音
+            Check("最短窗:語音後即靜音但未達minWindow→不收", !v5.Feed(0f, 100));
+            bool e5 = false; while (!e5 && v5.ElapsedMs < 600) e5 = v5.Feed(0f, 100);
+            Check("最短窗:到minWindow(600ms)後才收", e5 && v5.ElapsedMs == 600);
         }
 
         private static void T_AngleToDir()

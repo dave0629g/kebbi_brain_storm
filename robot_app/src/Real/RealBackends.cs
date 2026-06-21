@@ -45,11 +45,14 @@ namespace KebbiBrain.Real
             return clip;
         }
 
-        public static byte[] FromAudioClip(AudioClip clip)
+        public static byte[] FromAudioClip(AudioClip clip) => FromAudioClip(clip, clip.samples);
+
+        // 只取前 sampleCount 個樣本(動態窗:講完即收,不送整段含尾巴靜音給 STT)。
+        public static byte[] FromAudioClip(AudioClip clip, int sampleCount)
         {
-            int n = clip.samples;
+            int n = Mathf.Clamp(sampleCount, 0, clip.samples);
             var f = new float[n * clip.channels];
-            clip.GetData(f, 0);
+            if (n > 0) clip.GetData(f, 0);
             int sr = clip.frequency;
             using (var ms = new System.IO.MemoryStream())
             using (var bw = new System.IO.BinaryWriter(ms))
@@ -147,14 +150,35 @@ namespace KebbiBrain.Real
 
         public async Task<string> ListenAsync(string lang = "id-ID")
         {
-            // ⚠️ 先決:系統 wakeup 持麥時能否搶麥(見 UNITY_接入指南.md 必測①)。必要時先 Nuwa.stopListen()。
+            // ⚠️ 先決:系統 wakeup 持麥時能否搶麥(見 UNITY_接入指南.md 必測①)。必要時先 Nuwa.stopListen()(真機後續)。
             string mic = (Microphone.devices != null && Microphone.devices.Length > 0) ? Microphone.devices[0] : null;
             if (mic == null) { Debug.LogError("無麥克風裝置"); return ""; }
-            int seconds = 4;
-            var clip = Microphone.Start(mic, false, seconds, 16000);
-            await Task.Delay(seconds * 1000);
+
+            // 動態錄音窗:邊錄邊看 RMS 包絡,VadEndpointer 偵測「講完」(語音後連續靜音)就提早收窗,
+            // 取代寫死 4 秒盲錄(長句被切、講完硬等滿 4 秒才換手)。設 12 秒硬上限保底。
+            int sampleRate = 16000, maxSeconds = 12, frameMs = 100;
+            int frameSamples = sampleRate * frameMs / 1000;
+            var clip = Microphone.Start(mic, false, maxSeconds, sampleRate);
+            var vad = new VadEndpointer();
+            var buf = new float[frameSamples];
+            int lastPos = 0, total = 0;
+            while (true)
+            {
+                await Task.Delay(frameMs);
+                bool recording = Microphone.IsRecording(mic);
+                int pos = Microphone.GetPosition(mic); if (pos < 0) pos = 0;
+                while (pos - lastPos >= frameSamples && lastPos + frameSamples <= clip.samples)
+                {
+                    clip.GetData(buf, lastPos);
+                    lastPos += frameSamples; total = lastPos;
+                    if (vad.Feed(VadMath.Rms(buf), frameMs)) { recording = false; break; }   // 講完 → 收窗
+                }
+                if (!recording) { if (total < pos) total = pos; break; }                       // VAD 收窗或達硬上限
+            }
             Microphone.End(mic);
-            byte[] wav = WavUtil.FromAudioClip(clip);
+            if (total <= 0) total = clip.samples;
+            byte[] wav = WavUtil.FromAudioClip(clip, total);
+            Debug.Log("[STT] 動態窗收音 " + (total * 1000 / sampleRate) + "ms(" + (vad.SawSpeech ? "有語音" : "無語音") + ")");
 
             string url = "https://" + _region + ".stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=" + lang;
             using (var req = new UnityWebRequest(url, "POST"))
