@@ -78,6 +78,7 @@ namespace KebbiBrain
             T_Preflight();
             T_LiveToken();
             T_VisionTalk();
+            T_PresenceVision();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -672,6 +673,41 @@ namespace KebbiBrain
             Check("VisionLine 空場景有說明", App.VisionTalkContext.VisionLine(new string[0]).Contains("沒認出"));
             string turn = App.VisionTalkContext.BuildVisionTurnJson(pen_cup);
             Check("BuildVisionTurnJson 包成 clientContent+turnComplete+含標籤", turn.Contains("clientContent") && turn.Contains("turnComplete") && turn.Contains("筆"));
+        }
+
+        // 視覺安全之眼:隱私提示 + 只取 presence/position 解析 + 去抖狀態機。
+        private static void T_PresenceVision()
+        {
+            Console.WriteLine("\n— T_PresenceVision:視覺安全之眼(只判有沒有人/位置)—");
+
+            // 隱私提示:只問 presence/position、明確禁止辨識身分
+            string p = App.PresenceVision.PresencePrompt();
+            Check("提示只問有沒有人+位置、禁辨識身分", p.Contains("是否有") && p.Contains("person") && p.Contains("不要辨識身分"));
+
+            // 解析最小 JSON
+            var a = App.PresenceVision.FromResponse("{\"person\":true,\"x\":620}");
+            Check("最小JSON 有人+取 x", a.PersonPresent && Math.Abs(a.PositionX - 620f) < 0.5f);
+            var b = App.PresenceVision.FromResponse("{\"person\":false}");
+            Check("最小JSON 沒人→PositionX<0", !b.PersonPresent && b.PositionX < 0);
+            // 解析 Robotics-ER 陣列(含 person)
+            var c = App.PresenceVision.FromResponse("```json\n[{\"label\":\"person\",\"point\":[300,700]}]\n```");
+            Check("偵測陣列含 person→有人、取水平中心700", c.PersonPresent && Math.Abs(c.PositionX - 700f) < 0.5f);
+            var d = App.PresenceVision.FromResponse("[{\"label\":\"杯子\",\"point\":[100,200]}]");
+            Check("偵測陣列只有物體→沒人", !d.PersonPresent);
+            Check("空/壞回應→安全預設沒人", !App.PresenceVision.FromResponse("").PersonPresent && !App.PresenceVision.FromResponse("garbage").PersonPresent);
+            Check("人臉中文標籤也算人", App.PresenceVision.IsPersonLabel("一張臉") && App.PresenceVision.IsPersonLabel("face") && !App.PresenceVision.IsPersonLabel("杯子"));
+
+            // 去抖狀態機:需連續 2 幀才確認來/離
+            var w = new App.PresenceWatcher(confirmFrames: 2, moveThreshold: 120f);
+            var present = new App.PresenceState { PersonPresent = true, PositionX = 500f };
+            var absent = new App.PresenceState { PersonPresent = false, PositionX = -1f };
+            Check("第1幀有人→還沒確認(StillAbsent)", w.Observe(present) == App.PresenceEvent.StillAbsent);
+            Check("第2幀有人→確認 Arrived", w.Observe(present) == App.PresenceEvent.Arrived && w.Present);
+            Check("續有人→StillPresent", w.Observe(present) == App.PresenceEvent.StillPresent);
+            var moved = new App.PresenceState { PersonPresent = true, PositionX = 700f };
+            Check("移動超門檻→Moved", w.Observe(moved) == App.PresenceEvent.Moved);
+            Check("單幀消失→還沒確認(去抖,仍 Present)", w.Observe(absent) == App.PresenceEvent.StillPresent && w.Present);
+            Check("連續第2幀消失→確認 Left", w.Observe(absent) == App.PresenceEvent.Left && !w.Present);
         }
 
         private static void T_AngleToDir()

@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor, G3_MirrorCoach, RoboVisionTalk }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor, G3_MirrorCoach, RoboVisionTalk, SafetyEye }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -75,6 +75,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.Counselor: RunCounselor(); break;
             case Mode.G3_MirrorCoach: await RunMirrorCoachAsync(); break;
             case Mode.RoboVisionTalk: RunRoboVisionTalk(); break;
+            case Mode.SafetyEye: RunSafetyEye(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -266,6 +267,15 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     }
 
     // ── Gemini Robotics-ER 視覺:開相機 → 認物/指認 → 螢幕框出(掛 RoboticsVisionBehaviour 自跑) ──
+    // ── 視覺安全之眼:只判有沒有人/位置,看到人打招呼/轉頭,不存影像 ──
+    private void RunSafetyEye()
+    {
+        var go = new GameObject("SafetyEye");
+        var b = go.AddComponent<PresenceVisionBehaviour>();
+        b.apiKey = Config.GeminiKey;
+        Debug.Log("[SafetyEye] 啟動視覺安全之眼(只判有沒有人/位置,不存影像)");
+    }
+
     // ── 看著物件對話:Robotics-ER 認物 + Gemini Live 語音合一 ──
     private void RunRoboVisionTalk()
     {

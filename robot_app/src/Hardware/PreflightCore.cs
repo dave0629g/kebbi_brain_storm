@@ -21,6 +21,7 @@ namespace KebbiBrain.Hardware
                 case "LiveConversation": return new[] { PreflightItem.GeminiKey, PreflightItem.Microphone };
                 case "RoboticsVision": return new[] { PreflightItem.GeminiKey, PreflightItem.Camera };
                 case "RoboVisionTalk": return new[] { PreflightItem.GeminiKey, PreflightItem.Camera, PreflightItem.Microphone };
+                case "SafetyEye": return new[] { PreflightItem.GeminiKey, PreflightItem.Camera };
                 case "G4_TebakArah": return new[] { PreflightItem.SpeechKey, PreflightItem.Microphone };
                 case "ConverseStt": return new[] { PreflightItem.SpeechKey, PreflightItem.LlmKey, PreflightItem.Microphone, PreflightItem.Network };
                 case "Converse": return new[] { PreflightItem.SpeechKey, PreflightItem.LlmKey, PreflightItem.Network };
