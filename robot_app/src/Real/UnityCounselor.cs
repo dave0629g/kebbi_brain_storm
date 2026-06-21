@@ -110,7 +110,11 @@ namespace KebbiBrain.Real
             _notify.OnYellowQueued += c => WriteCard("🟡 待辦交接卡", c);
             _notify.OnSummary += c => WriteCard("📋 會談結束摘要", c);
             Debug.Log("[Counselor] 記錄落檔: " + _logPath);
-            _sess = new CounselorSession(ctx.Body, ctx.Voice, ctx.Llm, gate, _log, _notify, _planner, s => Debug.Log("[Counselor] " + s));  // ctx.Body→具身共情(真凱比=馬達點頭/前傾/面向;一般 Android=SimKebbiBody no-op)
+            // Air S 內建臉表情(playFaceAnimation)接進共情:燈號/時機→臉(Login暖/綠Happy/傾聽/黃Concerned/紅Calm)。
+            var face = new UnityFaceExpression();
+            _sess = new CounselorSession(ctx.Body, ctx.Voice, ctx.Llm, gate, _log, _notify, _planner, s => Debug.Log("[Counselor] " + s), face);  // ctx.Body→具身共情(真凱比=馬達;一般 Android=SimKebbiBody no-op);face→Air S 內建臉
+            // PIR 存在感(非視覺):學生靠近→迎接+暖臉、離開→降待命。真機驗 requestSensor(SENSOR_PIR)+onPIREvent。
+            try { _sess.WatchPresence(new UnityPresenceSensor()); } catch (Exception e) { Debug.LogWarning("[Counselor] PIR 接入略過: " + e.Message); }
 
             if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
             {

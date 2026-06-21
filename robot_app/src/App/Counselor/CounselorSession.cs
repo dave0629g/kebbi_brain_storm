@@ -18,6 +18,8 @@ namespace KebbiBrain.App.Counselor
         private readonly IExplorationPlanner _planner;
         private readonly Action<string> _out;
         private readonly IEmpathyBody _empathy;   // 具身共情:body 非空(Real)才動作;Sim/主控台=null → no-op
+        private readonly IFaceExpression _face;    // Air S 內建臉(可空):迎接/離開時切表情
+        private PresenceCompanion _presence;       // PIR 存在感(可空):學生來/離開
 
         private string _student;
         private ConvMode _mode;
@@ -33,11 +35,37 @@ namespace KebbiBrain.App.Counselor
 
         public CounselorSession(IKebbiBody body, IVoice voice, ILlm llm, ISafetyGate gate,
                                 IConversationLog log, INotifyHuman notify, IExplorationPlanner planner,
-                                Action<string> output = null)
+                                Action<string> output = null, IFaceExpression face = null)
         {
             _body = body; _voice = voice; _llm = llm; _gate = gate; _log = log; _notify = notify; _planner = planner;
             _out = output ?? Console.WriteLine;
-            _empathy = body != null ? new MotorEmpathyBody(body) : null;   // 真身體在時才接共情動作層
+            _face = face;
+            // body 或 face 任一存在就建共情層(Air S 主要靠臉,可無 body 單獨表情)。
+            _empathy = (body != null || face != null) ? new MotorEmpathyBody(body, face: face) : null;
+        }
+
+        public const string GreetLine = "嗨,你來啦,我看到你了。";
+
+        // 接 PIR 存在感:學生靠近 → 迎接(暖臉 + 招呼)、離開 → 降待命(中性臉)。Air S 用 PIR(非視覺)。
+        public void WatchPresence(IPresenceSensor sensor)
+        {
+            if (sensor == null) return;
+            _presence = new PresenceCompanion(sensor);
+            _presence.OnArrived = OnStudentArrived;
+            _presence.OnLeft = OnStudentLeft;
+        }
+
+        private void OnStudentArrived()
+        {
+            if (Ended) return;
+            _log.Append(Speaker.Kebbi, _mode, GreetLine, Layer.Green, LogEvent.None);
+            Speak(GreetLine, EmpathyMoment.Login);   // 暖臉 + 開場手勢
+        }
+
+        private void OnStudentLeft()
+        {
+            try { _face?.Show(FaceExpression.Neutral); } catch { }
+            _out("   🤖 凱比:(待命中,我在這等你)");
         }
 
         // 登入 + 明確告知「對話會記錄並提供輔導老師」(規格第五、十三節)。第一筆 log Event=Login。

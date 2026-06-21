@@ -81,6 +81,7 @@ namespace KebbiBrain
             T_PresenceVision();
             T_Presence();
             T_FaceExpression();
+            T_CounselorAirS();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -771,6 +772,37 @@ namespace KebbiBrain
             bool safe = true;
             try { var e2 = new App.Counselor.MotorEmpathyBody(body); e2.Express(App.Counselor.EmpathyMoment.Login); e2.FaceSpeaker(); } catch { safe = false; }
             Check("無臉(null)→不丟例外", safe);
+        }
+
+        // PIR 存在感 + 臉表情接進輔導室陪伴(端到端:迎接→綠燈→紅線→離開)。
+        private static void T_CounselorAirS()
+        {
+            Console.WriteLine("\n— T_CounselorAirS:PIR + 臉表情接進輔導 —");
+            Action<string> noop = _ => { };
+            var gate = new App.Counselor.SimSafetyGate();      // 從輸出目錄載入安全規則
+            var face = new SimFaceExpression();
+            var log = new App.Counselor.SimConversationLog("AIRS");
+            var notify = new App.Counselor.SimNotifyHuman(noop);
+            var sess = new App.Counselor.CounselorSession(null, null, new FakeGreenLlm(), gate, log, notify,
+                new App.Counselor.SimExplorationPlanner(), noop, face);   // face 接進去
+            var pir = new SimPresenceSensor();
+            sess.WatchPresence(pir);
+
+            sess.Start("學生", App.Counselor.ConvMode.Voice);
+            Check("Start 登入→臉 Warm", face.Last == FaceExpression.Warm);
+
+            pir.Emit(true);
+            string logText = ""; foreach (var t in log.GetTurns()) logText += t.Text + "|";
+            Check("PIR 學生來→招呼進記錄 + 臉 Warm", logText.Contains("你來啦") && face.Last == FaceExpression.Warm);
+
+            sess.StepAsync("還好啦,今天考完試").GetAwaiter().GetResult();
+            Check("綠燈陪聊→臉 Happy", face.Last == FaceExpression.Happy);
+
+            var redLayer = sess.StepAsync("我好想消失").GetAwaiter().GetResult();
+            Check("紅線→Layer Red + 臉 Calm(沉穩不驚恐)", redLayer == App.Counselor.Layer.Red && face.Last == FaceExpression.Calm);
+
+            pir.Emit(false);
+            Check("PIR 學生離開→臉 Neutral 降待命", face.Last == FaceExpression.Neutral);
         }
 
         private static void T_AngleToDir()
