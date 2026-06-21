@@ -42,6 +42,7 @@ namespace KebbiBrain.Real
                 new Item{ Label="輔導室陪伴機器人", Mode=KebbiAppBehaviour.Mode.Counselor, Lang="zh-TW", Name="凱比", Char="溫暖、穩、接得住的陪伴者", FullScreenUi=true },
                 new Item{ Label="即時語音對話(台灣中文)", Mode=KebbiAppBehaviour.Mode.LiveConversation, Lang="zh-TW", Name="凱比", Char="親切又有耐心的教育機器人", FullScreenUi=true },
                 new Item{ Label="視覺認物(Robotics-ER)", Mode=KebbiAppBehaviour.Mode.RoboticsVision, FullScreenUi=true },
+                new Item{ Label="看著物件對話(Live+視覺)", Mode=KebbiAppBehaviour.Mode.RoboVisionTalk, Lang="zh-TW", Name="凱比", Char="看著東西陪你聊的教育機器人", FullScreenUi=true },
                 new Item{ Label="鏡像體操教練(G3)", Mode=KebbiAppBehaviour.Mode.G3_MirrorCoach },
                 new Item{ Label="印尼語方位遊戲(G4)", Mode=KebbiAppBehaviour.Mode.G4_TebakArah },
                 new Item{ Label="兩台對話 · STT 端點(需兩台)", Mode=KebbiAppBehaviour.Mode.ConverseStt, Lang="zh-TW", Name="凱比", Char="親切", Note="這個要兩支手機" },

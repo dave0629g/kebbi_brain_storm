@@ -77,6 +77,7 @@ namespace KebbiBrain
             T_SecretsCheck();
             T_Preflight();
             T_LiveToken();
+            T_VisionTalk();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -613,6 +614,8 @@ namespace KebbiBrain
             var counReq = PreflightCore.RequirementsFor("Counselor");
             Check("Counselor 需 LLM+語音+麥克風", Has(counReq, PreflightItem.LlmKey) && Has(counReq, PreflightItem.SpeechKey) && Has(counReq, PreflightItem.Microphone));
             Check("未知功能→無需求", PreflightCore.RequirementsFor("X").Count == 0);
+            var rvtReq = PreflightCore.RequirementsFor("RoboVisionTalk");
+            Check("RoboVisionTalk 需 Gemini金鑰+相機+麥克風", Has(rvtReq, PreflightItem.GeminiKey) && Has(rvtReq, PreflightItem.Camera) && Has(rvtReq, PreflightItem.Microphone));
 
             // 聚合
             var r1 = PreflightCore.Evaluate(liveReq, _ => true);
@@ -647,6 +650,28 @@ namespace KebbiBrain
             Check("ephemeral 用 v1alpha、明文用 v1beta", tokUrl.Contains(".v1alpha.") && keyUrl.Contains(".v1beta."));
             Check("IsPlaintextKeyUrl:明文 true、ephemeral false", App.GeminiLiveProtocol.IsPlaintextKeyUrl(keyUrl) && !App.GeminiLiveProtocol.IsPlaintextKeyUrl(tokUrl));
             Check("null 安全(不丟例外)", App.GeminiLiveProtocol.WsUrl(null).Contains("?key=") && App.GeminiLiveProtocol.WsUrlEphemeral(null).Contains("?access_token="));
+        }
+
+        // 看著物件對話:場景摘要(去重/限數)+ 變化節流 + 注入 Live 文字。
+        private static void T_VisionTalk()
+        {
+            Console.WriteLine("\n— T_VisionTalk:看著物件對話 —");
+            var pen_cup = new[] { "筆", "杯子", "筆" };
+
+            Check("SceneSummary 去重保序", App.VisionTalkContext.SceneSummary(pen_cup) == "筆、杯子");
+            Check("SceneSummary 限數量(maxItems=2)", App.VisionTalkContext.SceneSummary(new[] { "a", "b", "c", "d" }, 2) == "a、b");
+            Check("SceneSummary 空→空字串", App.VisionTalkContext.SceneSummary(new string[0]) == "" && App.VisionTalkContext.SceneSummary(null) == "");
+            Check("SceneSummary 略過空白標籤", App.VisionTalkContext.SceneSummary(new[] { " ", "書", "" }) == "書");
+
+            Check("SceneChanged 同集合→false", !App.VisionTalkContext.SceneChanged(new[] { "筆" }, new[] { "筆" }));
+            Check("SceneChanged 多了東西→true", App.VisionTalkContext.SceneChanged(new[] { "筆", "杯子" }, new[] { "筆" }));
+            Check("SceneChanged 空↔非空→true", App.VisionTalkContext.SceneChanged(new string[0], new[] { "筆" }));
+            Check("SceneChanged 只是順序變→false(集合相同)", !App.VisionTalkContext.SceneChanged(new[] { "筆", "杯子" }, new[] { "杯子", "筆" }));
+
+            Check("VisionLine 含摘要", App.VisionTalkContext.VisionLine(pen_cup).Contains("筆、杯子"));
+            Check("VisionLine 空場景有說明", App.VisionTalkContext.VisionLine(new string[0]).Contains("沒認出"));
+            string turn = App.VisionTalkContext.BuildVisionTurnJson(pen_cup);
+            Check("BuildVisionTurnJson 包成 clientContent+turnComplete+含標籤", turn.Contains("clientContent") && turn.Contains("turnComplete") && turn.Contains("筆"));
         }
 
         private static void T_AngleToDir()

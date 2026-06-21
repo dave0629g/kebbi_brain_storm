@@ -37,6 +37,7 @@ namespace KebbiBrain.Real
         private bool _frontCamera;
         private string _pointing = "";
         private float _pointShownUntil;
+        public System.Action<List<string>> OnSceneLabels;  // 每次認物完回報標籤清單(看著物件對話的橋接用)
 
         private IEnumerator Start()
         {
@@ -120,6 +121,12 @@ namespace KebbiBrain.Real
                 {
                     string resp = req.downloadHandler.text;
                     _dets = GeminiRoboticsProtocol.ParseDetections(resp);
+                    if (OnSceneLabels != null)
+                    {
+                        var labels = new List<string>();
+                        foreach (var d in _dets) if (!string.IsNullOrEmpty(d.Label)) labels.Add(d.Label);
+                        OnSceneLabels(labels);
+                    }
                     _shots++;
                     var sb = new StringBuilder();
                     foreach (var d in _dets) sb.Append(d.Label).Append(' ');

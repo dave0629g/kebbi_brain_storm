@@ -113,6 +113,13 @@ namespace KebbiBrain.Real
             await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
         }
 
+        // 外部注入一段文字脈絡(如相機看到的物體)→ 當一輪 user 輸入,讓凱比回應(看著物件對話用)。
+        public void InjectContext(string text)
+        {
+            if (!_setupDone || string.IsNullOrEmpty(text)) return;
+            _sendQ.Enqueue(GeminiLiveProtocol.BuildTextTurnJson(text));
+        }
+
         private async Task ReceiveLoop()
         {
             var buf = new byte[1 << 16];

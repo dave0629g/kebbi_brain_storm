@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor, G3_MirrorCoach }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor, G3_MirrorCoach, RoboVisionTalk }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -74,6 +74,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.LiveConversation: RunLiveConversation(); break;
             case Mode.Counselor: RunCounselor(); break;
             case Mode.G3_MirrorCoach: await RunMirrorCoachAsync(); break;
+            case Mode.RoboVisionTalk: RunRoboVisionTalk(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -265,6 +266,16 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
     }
 
     // ── Gemini Robotics-ER 視覺:開相機 → 認物/指認 → 螢幕框出(掛 RoboticsVisionBehaviour 自跑) ──
+    // ── 看著物件對話:Robotics-ER 認物 + Gemini Live 語音合一 ──
+    private void RunRoboVisionTalk()
+    {
+        var go = new GameObject("RoboVisionTalk");
+        var b = go.AddComponent<RoboVisionTalkBehaviour>();
+        b.apiKey = Config.GeminiKey;
+        b.personaLang = personaLang;
+        Debug.Log("[RoboVisionTalk] 啟動看著物件對話(geminiKey len=" + (Config.GeminiKey ?? "").Length + ")");
+    }
+
     private void RunRoboticsVision()
     {
         var go = new GameObject("RoboVision");
