@@ -72,6 +72,7 @@ namespace KebbiBrain
             T_UdpLoopback();
             T_TranslateRelay();
             T_Touch();
+            T_StoryCircle();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -488,6 +489,54 @@ namespace KebbiBrain
             Check("摸頭不交棒", !new TouchTurnToken(true).OnTouch(TouchZone.Head));
             tok.Grab();
             Check("被交棒回來→重獲發言權", tok.HasFloor);
+        }
+
+        // 說話接力故事圈:點名輪替狀態機 + 凱比插話 + DOA 轉頭 + 主持 game 端到端。
+        private static void T_StoryCircle()
+        {
+            Console.WriteLine("\n— T_StoryCircle:說話接力故事圈 —");
+            Action<string> noop = _ => { };
+            var kids = new System.Collections.Generic.List<App.StoryParticipant>
+            {
+                new App.StoryParticipant("小安", -30f),
+                new App.StoryParticipant("小明", 0f),
+                new App.StoryParticipant("小華", 30f),
+            };
+
+            // 輪替序列(小朋友 round-robin + 凱比每 2 位插一句)
+            var core = new App.StoryCircleCore(kids, kebbiEvery: 2);
+            string seq = ""; var kebbiAt = new System.Collections.Generic.List<int>();
+            for (int i = 0; i < 6; i++) { var p = core.Next(); seq += p.Name + ","; if (p.IsKebbi) kebbiAt.Add(i); }
+            Check("輪替序列正確", seq == "小安,小明,凱比,小華,小安,凱比,");
+            Check("凱比在 index 2、5", kebbiAt.Count == 2 && kebbiAt[0] == 2 && kebbiAt[1] == 5);
+            Check("小朋友 round-robin 跨凱比延續(凱比後接小華非重頭)", seq.Split(',')[3] == "小華");
+
+            // KebbiEvery=0 → 純 round-robin 無凱比
+            var core2 = new App.StoryCircleCore(kids, kebbiEvery: 0);
+            string seq2 = ""; for (int i = 0; i < 4; i++) seq2 += core2.Next().Name + ",";
+            Check("KebbiEvery=0→純 round-robin 無凱比", seq2 == "小安,小明,小華,小安,");
+
+            // Add 依序累積、空句不接
+            var core3 = new App.StoryCircleCore(kids, kebbiEvery: 0);
+            core3.Next(); core3.Add("從前有座山"); core3.Next(); core3.Add("   "); core3.Next(); core3.Add("山上有廟");
+            Check("Add 依序接、空句不接", core3.Story.Count == 2 && core3.Story[0] == "小安:從前有座山" && core3.Story[1] == "小華:山上有廟");
+
+            // 點名轉頭:Next→小華(DOA30)→ FaceFully NeckZ≈30
+            var body = new SimKebbiBody(noop, canMove: false);
+            var core4 = new App.StoryCircleCore(kids, kebbiEvery: 0);
+            core4.Next(); core4.Next(); var third = core4.Next();
+            KebbiHead.FaceFully(body, third.DoaDeg);
+            Check("點名小華→FaceFully NeckZ≈30", third.Name == "小華" && Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.5f);
+
+            // 主持 game 端到端:2 小朋友 + 凱比每 2 位,跑 4 回合
+            var kids2 = new System.Collections.Generic.List<App.StoryParticipant>
+            { new App.StoryParticipant("阿明", -20f), new App.StoryParticipant("阿華", 20f) };
+            var voice = new SimVoice(noop);
+            voice.EnqueueHeard("有一隻貓"); voice.EnqueueHeard("貓很愛睡覺"); voice.EnqueueHeard("後來牠醒了");
+            var game = new App.StoryCircleGame(kids2, voice, new RelayLlm(), body, kebbiEvery: 2, log: noop);
+            Check("Game 跑 4 回合不卡死", game.RunTurnsAsync(4).Wait(3000));
+            Check("故事 4 句、首句為小朋友", game.Core.Story.Count == 4 && game.Core.Story[0] == "阿明:有一隻貓");
+            Check("第 3 句為凱比貢獻(LLM)", game.Core.Story[2].StartsWith("凱比:"));
         }
 
         private static void T_AngleToDir()
