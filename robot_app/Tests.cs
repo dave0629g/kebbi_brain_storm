@@ -64,6 +64,7 @@ namespace KebbiBrain
             T_GeminiLive();
             T_Counselor();
             T_EmpathyBody();
+            T_RoboGuide();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -130,6 +131,37 @@ namespace KebbiBrain
             try { var e2 = new App.Counselor.MotorEmpathyBody(null); e2.Express(App.Counselor.EmpathyMoment.GreenChat); e2.FaceSpeaker(); }
             catch { nullSafe = false; }
             Check("null body → 共情 no-op 不丟例外", nullSafe);
+        }
+
+        // RoboGuide:Robotics-ER 視覺座標(0–1000)→ 轉頭角(純函式)+ 串 FaceFully 真轉頭。
+        private static void T_RoboGuide()
+        {
+            Console.WriteLine("\n— T_RoboGuide:視覺座標→轉頭指認 —");
+
+            // 中央→0、左緣→-fov/2、右緣→+fov/2、超界夾限、fov<=0 用預設
+            Check("AngleForX 中央500→0°", Math.Abs(RoboGuideMath.AngleForX(500f, 62f)) < 0.001f);
+            Check("AngleForX 左緣0→-31°", Math.Abs(RoboGuideMath.AngleForX(0f, 62f) - (-31f)) < 0.01f);
+            Check("AngleForX 右緣1000→+31°", Math.Abs(RoboGuideMath.AngleForX(1000f, 62f) - 31f) < 0.01f);
+            Check("AngleForX 超界1200夾限→+31°", Math.Abs(RoboGuideMath.AngleForX(1200f, 62f) - 31f) < 0.01f);
+            Check("AngleForX fov<=0→用預設", Math.Abs(RoboGuideMath.AngleForX(1000f, 0f) - RoboGuideMath.DefaultCameraFovDeg / 2f) < 0.01f);
+
+            // CenterX:box 取中點、point 取 X、皆無→500
+            Check("CenterX box→中點400", Math.Abs(RoboGuideMath.CenterX(new Detection { HasBox = true, Xmin = 200, Xmax = 600 }) - 400f) < 0.01f);
+            Check("CenterX point→X750", Math.Abs(RoboGuideMath.CenterX(new Detection { HasPoint = true, X = 750 }) - 750f) < 0.01f);
+            Check("CenterX 皆無→中央500", Math.Abs(RoboGuideMath.CenterX(new Detection { Label = "x" }) - 500f) < 0.01f);
+
+            // 鏡像 + 前/後鏡頭方向
+            Check("MirrorX 0↔1000、250↔750", Math.Abs(RoboGuideMath.MirrorX(0f) - 1000f) < 0.01f && Math.Abs(RoboGuideMath.MirrorX(250f) - 750f) < 0.01f);
+            var rightDet = new Detection { HasPoint = true, X = 750 };
+            Check("後鏡頭:右物→正角(向右轉)", RoboGuideMath.AngleForDetection(rightDet, 62f, false) > 0f);
+            Check("前鏡頭:右物鏡像→負角", RoboGuideMath.AngleForDetection(rightDet, 62f, true) < 0f);
+
+            // 串 FaceFully:右側物(x=750→角≈+15.5,在 NeckZ ±40 內)→ 頭真的轉到該角
+            Action<string> noop = _ => { };
+            var body = new SimKebbiBody(noop, canMove: false);
+            float ang = RoboGuideMath.AngleForDetection(rightDet, 62f, false);
+            KebbiHead.FaceFully(body, ang);
+            Check("FaceFully 指右物→NeckZ 朝該角(可達)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - ang) < 0.5f && body.GetMotor(KebbiMotor.NeckZ) > 0f);
         }
 
         private static void T_AngleToDir()

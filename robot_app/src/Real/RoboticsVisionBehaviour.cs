@@ -1,7 +1,7 @@
 // Gemini Robotics-ER 視覺探索(整檔 #if UNITY)。
 // 開相機 → 每隔幾秒拍一張 → 送 Gemini Robotics-ER 看 → 在螢幕上框出/指出物體+繁中標籤。
 // 讓你在 Android 上直接「看 Gemini 能認出什麼、在哪」。需要 Config.GeminiKey(KEBBI_GEMINI_KEY 注入)。
-// 之後可把偵測到的物體座標接 NeckZ/FaceFully 讓 Kebbi 轉頭/指它,或用 TTS 講出來。
+// RoboGuide:點畫面上的物體 → 凱比讀座標用 RoboGuideMath→FaceFully 轉頭指它 + TTS 念出名稱。
 #if UNITY
 using System;
 using System.Collections;
@@ -10,6 +10,7 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Android;
 using UnityEngine.Networking;
+using KebbiBrain;
 using KebbiBrain.Hardware;
 
 namespace KebbiBrain.Real
@@ -28,6 +29,14 @@ namespace KebbiBrain.Real
         private int _shots, _errors, _lastMs;
         private bool _busy;
         private static Texture2D _px;
+
+        // RoboGuide:轉頭指認 + 念名稱。Body/Voice 由 KebbiFactory 取(非真凱比=SimKebbiBody no-op)。
+        public float cameraFovDeg = RoboGuideMath.DefaultCameraFovDeg;  // 相機水平 FOV,真機現場校(必測③)
+        private IKebbiBody _body;
+        private IVoice _voice;
+        private bool _frontCamera;
+        private string _pointing = "";
+        private float _pointShownUntil;
 
         private IEnumerator Start()
         {
@@ -49,12 +58,17 @@ namespace KebbiBrain.Real
             if (!Permission.HasUserAuthorizedPermission(Permission.Camera))
             { _status = "⚠ 沒有相機權限(請到設定允許 CAMERA)"; Debug.LogWarning("[RoboVision] " + _status); yield break; }
 
+            // RoboGuide:取 Body(轉頭)+ Voice(念名稱)。非真凱比時 Body=SimKebbiBody(SetMotor 只 log,不會動)。
+            try { var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log); _body = ctx.Body; _voice = ctx.Voice; }
+            catch (Exception e) { Debug.LogWarning("[RoboGuide] 取 Body/Voice 失敗(指認/念名稱停用): " + e.Message); }
+
             // 給裝置時間枚舉相機(剛授權時 devices 可能還是空的)。
             float wd = 0f;
             while (WebCamTexture.devices.Length == 0 && wd < 4f) { yield return new WaitForSeconds(0.3f); wd += 0.3f; }
             string dev = null;
             foreach (var d in WebCamTexture.devices) { if (!d.isFrontFacing) { dev = d.name; break; } }  // 後鏡頭優先
             if (dev == null && WebCamTexture.devices.Length > 0) dev = WebCamTexture.devices[0].name;
+            foreach (var d in WebCamTexture.devices) if (d.name == dev) { _frontCamera = d.isFrontFacing; break; }  // 前鏡頭影像鏡像→指認時翻 x
             _cam = string.IsNullOrEmpty(dev) ? new WebCamTexture(1280, 720, 30) : new WebCamTexture(dev, 1280, 720, 30);
             _cam.Play();
             // 等相機真的開始吐影格(width 變 >16 才能取像)。
@@ -127,20 +141,33 @@ namespace KebbiBrain.Real
             int fs = Mathf.Clamp(sh / 36, 20, 40);
             foreach (var d in _dets)
             {
+                Rect tap;
                 if (d.HasBox)
                 {
                     float x = d.Xmin / 1000f * sw, y = d.Ymin / 1000f * sh;
                     float w = (d.Xmax - d.Xmin) / 1000f * sw, h = (d.Ymax - d.Ymin) / 1000f * sh;
                     DrawRect(new Rect(x, y, w, h), Color.green, 3);
                     DrawTag(d.Label, x, y, fs);
+                    tap = new Rect(x, y, w, h);
                 }
                 else if (d.HasPoint)
                 {
                     float x = d.X / 1000f * sw, y = d.Y / 1000f * sh;
                     DrawRect(new Rect(x - 13, y - 13, 26, 26), Color.green, 3);
                     DrawTag(d.Label, x + 16, y - fs - 6, fs);
+                    tap = new Rect(x - 44, y - 44, 88, 88);
                 }
+                else continue;
+                if (GUI.Button(tap, GUIContent.none, GUIStyle.none)) PointAt(d);  // 透明熱區:點它→轉頭指認+念名稱
             }
+
+            // 頂部提示:操作說明 / 最近指認的物體。
+            int hs = Mathf.Clamp(sh / 50, 14, 26), hbar = hs + 14;
+            Fill(new Rect(0, 0, sw, hbar), new Color(0, 0, 0, 0.45f));
+            var hint = new GUIStyle(GUI.skin.label) { fontSize = hs, normal = { textColor = Color.white } };
+            string htext = (!string.IsNullOrEmpty(_pointing) && Time.realtimeSinceStartup < _pointShownUntil)
+                         ? "指著:" + _pointing : "點畫面上的物體 → 凱比轉頭指它並念出名稱";
+            GUI.Label(new Rect(12, 6, sw - 24, hbar), htext, hint);
 
             // 底部一行小狀態(深色半透明底);出錯才顯紅。
             int ss = Mathf.Clamp(sh / 64, 14, 26);
@@ -175,6 +202,21 @@ namespace KebbiBrain.Real
             GUI.DrawTexture(new Rect(r.x, r.y, th, r.height), _px);
             GUI.DrawTexture(new Rect(r.xMax - th, r.y, th, r.height), _px);
             GUI.color = old;
+        }
+
+        // RoboGuide:點一個偵測到的物體 → 讀其座標算轉頭角 → FaceFully 轉頭朝它 + TTS 念名稱。
+        private void PointAt(Detection d)
+        {
+            try
+            {
+                float ang = RoboGuideMath.AngleForDetection(d, cameraFovDeg, _frontCamera);
+                if (_body != null) KebbiHead.FaceFully(_body, ang);                       // 輪式=底盤+頭;H201=頭部夾 ±40 部分面向
+                if (_voice != null && !string.IsNullOrEmpty(d.Label)) { try { _ = _voice.SpeakAsync(d.Label, "zh-TW"); } catch { } }
+                _pointing = d.Label; _pointShownUntil = Time.realtimeSinceStartup + 3f;
+                Debug.Log("[RoboGuide] 指「" + d.Label + "」@ x=" + RoboGuideMath.CenterX(d).ToString("0")
+                          + " → 轉頭 " + ang.ToString("0.0") + "°" + (_frontCamera ? " (前鏡頭鏡像)" : ""));
+            }
+            catch (Exception e) { Debug.LogWarning("[RoboGuide] 指認失敗: " + e.Message); }
         }
 
         private static string Trunc(string s, int n) => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s.Substring(0, n) + "…");
