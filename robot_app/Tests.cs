@@ -69,6 +69,7 @@ namespace KebbiBrain
             T_CounselorHandoff();
             T_Vad();
             T_SafetyReload();
+            T_UdpLoopback();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -345,6 +346,52 @@ namespace KebbiBrain
             throwNext = false; src = new System.Collections.Generic.List<App.Counselor.SafetyRule>();
             Check("空規則重載回 false", !gate.TryReload(out _));
             Check("空規則:仍保留前一版守門(red2 Red)", gate.Evaluate("我想逃走").Layer == App.Counselor.Layer.Red);
+        }
+
+        // 真 UDP 環回:RobotLinkProtocol 封包經真 UdpClient(loopback 隨機埠)收送 → 鎖住「真 UDP 從未測過」的傳輸路徑。
+        // 既有 T_RobotLinkProtocol 只測記憶體編解碼;此測補上實際 socket 收送(byte 邊界/UTF8 過線)。--test 即 CI 回歸網。
+        private static void T_UdpLoopback()
+        {
+            Console.WriteLine("\n— T_UdpLoopback:真 UDP 環回封包編解碼 —");
+            System.Net.Sockets.UdpClient rx = null, tx = null;
+            try
+            {
+                rx = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+                rx.Client.ReceiveTimeout = 2000;
+                int port = ((System.Net.IPEndPoint)rx.Client.LocalEndPoint).Port;
+                tx = new System.Net.Sockets.UdpClient();
+                var dst = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port);
+                var any = new System.Net.IPEndPoint(System.Net.IPAddress.Any, 0);
+
+                // 1) 一般訊息 round-trip
+                byte[] p1 = Hardware.RobotLinkProtocol.Frame("A機", "B機", "HANDOFF#1 關卡完成");
+                tx.Send(p1, p1.Length, dst);
+                byte[] r1 = rx.Receive(ref any);
+                bool ok1 = Hardware.RobotLinkProtocol.TryParse(r1, r1.Length, out var f1, out var t1, out var x1);
+                Check("UDP環回:一般訊息 round-trip", ok1 && f1 == "A機" && t1 == "B機" && x1 == "HANDOFF#1 關卡完成");
+                Check("UDP環回:收後 ShouldDeliver 對非自己/廣播為真", Hardware.RobotLinkProtocol.ShouldDeliver(f1, "B機", "B機"));
+
+                // 2) 空 text
+                byte[] p2 = Hardware.RobotLinkProtocol.Frame("X", "Y", "");
+                tx.Send(p2, p2.Length, dst);
+                byte[] r2 = rx.Receive(ref any);
+                Check("UDP環回:空 text round-trip", Hardware.RobotLinkProtocol.TryParse(r2, r2.Length, out _, out _, out var x2) && x2 == "");
+
+                // 3) 特殊字/中文/emoji + BC|/VC| 樣式
+                string payload = "BC|1,30,50;VC|你好嗎～測試😀";
+                byte[] p3 = Hardware.RobotLinkProtocol.Frame("甲", "乙", payload);
+                tx.Send(p3, p3.Length, dst);
+                byte[] r3 = rx.Receive(ref any);
+                Check("UDP環回:特殊字/中文/emoji round-trip", Hardware.RobotLinkProtocol.TryParse(r3, r3.Length, out _, out _, out var x3) && x3 == payload);
+
+                // 4) 垃圾封包(無分隔)→ TryParse 安全回 false,不崩
+                byte[] junk = System.Text.Encoding.UTF8.GetBytes("沒有分隔的垃圾封包");
+                tx.Send(junk, junk.Length, dst);
+                byte[] r4 = rx.Receive(ref any);
+                Check("UDP環回:垃圾封包→TryParse 安全回 false", !Hardware.RobotLinkProtocol.TryParse(r4, r4.Length, out _, out _, out _));
+            }
+            catch (Exception e) { Check("UDP環回:測試例外(" + e.Message + ")", false); }
+            finally { try { if (rx != null) rx.Close(); } catch { } try { if (tx != null) tx.Close(); } catch { } }
         }
 
         private static void T_AngleToDir()
