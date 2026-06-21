@@ -22,12 +22,17 @@ namespace KebbiBrain.Cloud
             string url = "https://" + _region + ".tts.speech.microsoft.com/cognitiveservices/v1";
             string ssml = "<speak version='1.0' xml:lang='" + lang + "'>" +
                           "<voice xml:lang='" + lang + "' name='" + voice + "'>" + XmlEscape(text) + "</voice></speak>";
-            var req = new HttpRequestMessage(HttpMethod.Post, url);
-            req.Headers.Add("Ocp-Apim-Subscription-Key", _key);
-            req.Headers.Add("X-Microsoft-OutputFormat", "riff-16khz-16bit-mono-pcm");
-            req.Headers.Add("User-Agent", "kebbi-brain");
-            req.Content = new StringContent(ssml, Encoding.UTF8, "application/ssml+xml");
-            var resp = await Http.Client.SendAsync(req);
+            Func<HttpRequestMessage> make = () =>
+            {
+                var r = new HttpRequestMessage(HttpMethod.Post, url);
+                r.Headers.Add("Ocp-Apim-Subscription-Key", _key);
+                r.Headers.Add("X-Microsoft-OutputFormat", "riff-16khz-16bit-mono-pcm");
+                r.Headers.Add("User-Agent", "kebbi-brain");
+                r.Content = new StringContent(ssml, Encoding.UTF8, "application/ssml+xml");
+                return r;
+            };
+            var resp = await CloudRetry.SendAsync(make);   // 429/5xx/逾時退避重試
+            if (resp == null) throw new Exception("Azure TTS 連線失敗(重試用盡)");
             if (!resp.IsSuccessStatusCode)
                 throw new Exception("Azure TTS 失敗 " + (int)resp.StatusCode + "：" + await resp.Content.ReadAsStringAsync());
             return await resp.Content.ReadAsByteArrayAsync();
@@ -37,14 +42,19 @@ namespace KebbiBrain.Cloud
         public async Task<string> RecognizeWavAsync(byte[] wav, string lang)
         {
             string url = "https://" + _region + ".stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=" + lang;
-            var req = new HttpRequestMessage(HttpMethod.Post, url);
-            req.Headers.Add("Ocp-Apim-Subscription-Key", _key);
-            req.Headers.Add("Accept", "application/json");
-            var content = new ByteArrayContent(wav);
-            // .NET 的 MediaTypeHeaderValue.Parse 會拒絕 codecs=audio/pcm(含斜線);直接塞原字串給 Azure。
-            content.Headers.TryAddWithoutValidation("Content-Type", "audio/wav; codecs=audio/pcm; samplerate=16000");
-            req.Content = content;
-            var resp = await Http.Client.SendAsync(req);
+            Func<HttpRequestMessage> make = () =>
+            {
+                var r = new HttpRequestMessage(HttpMethod.Post, url);
+                r.Headers.Add("Ocp-Apim-Subscription-Key", _key);
+                r.Headers.Add("Accept", "application/json");
+                var content = new ByteArrayContent(wav);
+                // .NET 的 MediaTypeHeaderValue.Parse 會拒絕 codecs=audio/pcm(含斜線);直接塞原字串給 Azure。
+                content.Headers.TryAddWithoutValidation("Content-Type", "audio/wav; codecs=audio/pcm; samplerate=16000");
+                r.Content = content;
+                return r;
+            };
+            var resp = await CloudRetry.SendAsync(make);   // 429/5xx/逾時退避重試
+            if (resp == null) throw new Exception("Azure STT 連線失敗(重試用盡)");
             string json = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
                 throw new Exception("Azure STT 失敗 " + (int)resp.StatusCode + "：" + json);

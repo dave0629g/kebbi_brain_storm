@@ -32,11 +32,15 @@ namespace KebbiBrain.Cloud
                     new { role = "user", content = user }
                 }
             });
-            var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
-            req.Headers.Add("Authorization", "Bearer " + _key);
-            req.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-            var resp = await Http.Client.SendAsync(req);
+            Func<HttpRequestMessage> make = () =>
+            {
+                var r = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
+                r.Headers.Add("Authorization", "Bearer " + _key);
+                r.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                return r;
+            };
+            var resp = await CloudRetry.SendAsync(make, _out);   // 429/5xx/逾時退避重試
+            if (resp == null) throw new Exception("OpenAI 連線失敗(重試用盡)");
             string json = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
                 throw new Exception("OpenAI API 失敗 " + (int)resp.StatusCode + "：" + json);

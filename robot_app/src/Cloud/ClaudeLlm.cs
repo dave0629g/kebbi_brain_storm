@@ -31,12 +31,16 @@ namespace KebbiBrain.Cloud
                 system = system,
                 messages = new[] { new { role = "user", content = user } }
             });
-            var req = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-            req.Headers.Add("x-api-key", _key);
-            req.Headers.Add("anthropic-version", "2023-06-01");
-            req.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-            var resp = await Http.Client.SendAsync(req);
+            Func<HttpRequestMessage> make = () =>
+            {
+                var r = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
+                r.Headers.Add("x-api-key", _key);
+                r.Headers.Add("anthropic-version", "2023-06-01");
+                r.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                return r;
+            };
+            var resp = await CloudRetry.SendAsync(make, _out);   // 429/5xx/逾時退避重試
+            if (resp == null) throw new Exception("Claude 連線失敗(重試用盡)");
             string json = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
                 throw new Exception("Claude API 失敗 " + (int)resp.StatusCode + "：" + json);

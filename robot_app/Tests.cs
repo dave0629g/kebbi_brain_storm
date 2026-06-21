@@ -65,6 +65,7 @@ namespace KebbiBrain
             T_Counselor();
             T_EmpathyBody();
             T_RoboGuide();
+            T_CloudRetry();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -162,6 +163,56 @@ namespace KebbiBrain
             float ang = RoboGuideMath.AngleForDetection(rightDet, 62f, false);
             KebbiHead.FaceFully(body, ang);
             Check("FaceFully 指右物→NeckZ 朝該角(可達)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - ang) < 0.5f && body.GetMotor(KebbiMotor.NeckZ) > 0f);
+        }
+
+        // 雲端退避守門:RetryPolicy 決策(純)+ RetryLoop 迴圈(假後端,注入即時 delay)。
+        private static void T_CloudRetry()
+        {
+            Console.WriteLine("\n— T_CloudRetry:雲端退避守門 —");
+            var p = new RetryPolicy(maxAttempts: 4, baseDelayMs: 400, maxDelayMs: 8000);
+
+            // 決策:成功/快速失敗/可重試
+            Check("200→不重試", !p.Next(200, 1).ShouldRetry);
+            Check("204/302→成功不重試", !p.Next(204, 1).ShouldRetry && !p.Next(302, 1).ShouldRetry);
+            Check("401→快速失敗", !p.Next(401, 1).ShouldRetry);
+            Check("403→快速失敗", !p.Next(403, 1).ShouldRetry);
+            Check("400/404→用戶端錯不重試", !p.Next(400, 1).ShouldRetry && !p.Next(404, 1).ShouldRetry);
+            Check("429 第1次→重試", p.Next(429, 1).ShouldRetry);
+            Check("500/503 第1次→重試", p.Next(500, 1).ShouldRetry && p.Next(503, 1).ShouldRetry);
+            Check("0(逾時/網路例外)→重試", p.Next(0, 1).ShouldRetry);
+
+            // 退避:Retry-After、上限夾、指數遞增、用盡
+            Check("429 帶 Retry-After=2→等2000ms", p.Next(429, 1, 2).DelayMs == 2000);
+            Check("Retry-After 超上限→夾 MaxDelayMs", p.Next(429, 1, 999).DelayMs == 8000);
+            Check("指數退避遞增(第2次>第1次)", p.Next(500, 2).DelayMs > p.Next(500, 1).DelayMs);
+            Check("退避夾在 MaxDelayMs 內", p.Next(500, 3).DelayMs <= 8000);
+            Check("用盡(第4次=上限)→不重試", !p.Next(500, 4).ShouldRetry);
+
+            Func<int, Task> noDelay = _ => Task.CompletedTask;
+
+            // 429→429→200:第3次成功,共送3次
+            int calls = 0; var seq = new[] { 429, 429, 200 };
+            string outv = RetryLoop.RunAsync<string>(async attempt =>
+            {
+                calls++; await Task.Yield();
+                int st = seq[Math.Min(attempt - 1, seq.Length - 1)];
+                return new AttemptResult<string>(st == 200 ? "OK" : "busy", st);
+            }, p, noDelay).GetAwaiter().GetResult();
+            Check("RetryLoop 429→429→200 回 OK", outv == "OK");
+            Check("RetryLoop 共送 3 次", calls == 3);
+
+            // 持續 500:送滿上限後停、回最後值
+            int calls2 = 0;
+            string outv2 = RetryLoop.RunAsync<string>(async attempt =>
+            { calls2++; await Task.Yield(); return new AttemptResult<string>("err", 500); }, p, noDelay).GetAwaiter().GetResult();
+            Check("RetryLoop 持續500→送滿 MaxAttempts(4)次", calls2 == 4);
+            Check("RetryLoop 用盡→回最後一次值", outv2 == "err");
+
+            // 401:立即停、只送1次
+            int calls3 = 0;
+            RetryLoop.RunAsync<string>(async attempt =>
+            { calls3++; await Task.Yield(); return new AttemptResult<string>("no", 401); }, p, noDelay).GetAwaiter().GetResult();
+            Check("RetryLoop 401→只送1次", calls3 == 1);
         }
 
         private static void T_AngleToDir()
