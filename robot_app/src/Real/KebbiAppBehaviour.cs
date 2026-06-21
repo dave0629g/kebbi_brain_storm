@@ -19,7 +19,7 @@ using KebbiBrain.Sim;
 
 public sealed class KebbiAppBehaviour : MonoBehaviour
 {
-    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor }
+    public enum Mode { G4_TebakArah, LinkPingTest, G1Director, Controlled, G5Director, G2Director, Converse, ConverseStt, RoboticsVision, LiveConversation, Counselor, G3_MirrorCoach }
 
     [Header("執行模式")]
     public Mode mode = Mode.G4_TebakArah;
@@ -73,6 +73,7 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
             case Mode.RoboticsVision: RunRoboticsVision(); break;
             case Mode.LiveConversation: RunLiveConversation(); break;
             case Mode.Counselor: RunCounselor(); break;
+            case Mode.G3_MirrorCoach: await RunMirrorCoachAsync(); break;
             default: await RunTebakArahAsync(); break;
         }
     }
@@ -87,6 +88,20 @@ public sealed class KebbiAppBehaviour : MonoBehaviour
         Debug.Log("[G4] 校準一位學生 → 出一題方位");
         await game.CalibrateOneAsync("學生A");
         await game.ForwardRoundAsync(Dir.Kanan);
+        game.PrintSummary();
+    }
+
+    // ── G3:鏡像體操教練(單機;凱比逐幀示範體操/太極/CPR + 跟做)──
+    // 已完整實作+測過的具身遊戲,本入口讓它在實機跑得起來。無 MediaPipe 真姿態 → 先用 SimPoseSensor
+    // 的「示範+口頭引導」版(每拍視為跟上、不阻塞 STT);相機姿態評分列第二期(依 RoboVision 額度/延遲再決定)。
+    private async Task RunMirrorCoachAsync()
+    {
+        var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);
+        if (isH201Desktop && ctx.Body is UnityKebbiBody body) body.CanMove = false;
+
+        var game = new MirrorCoachGame(ctx, new SimPoseSensor(Debug.Log));  // 示範版:姿態檢查預設過,聚焦逐幀示範
+        Debug.Log("[G3] 鏡像體操教練:逐組示範(暖身→太極→CPR)+ 跟做");
+        await game.RunSessionAsync(MirrorCoachGame.MakeDefaultRoutine());
         game.PrintSummary();
     }
 
