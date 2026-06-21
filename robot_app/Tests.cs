@@ -80,6 +80,7 @@ namespace KebbiBrain
             T_VisionTalk();
             T_PresenceVision();
             T_Presence();
+            T_FaceExpression();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -744,6 +745,32 @@ namespace KebbiBrain
             Check("去抖:第1次有人未確認", g2 == 0 && !c2.Present);
             s2.Emit(true);
             Check("去抖:第2次有人→確認迎接", g2 == 1 && c2.Present);
+        }
+
+        // 臉表情接情緒:時機→FaceExpression 映射 + MotorEmpathyBody 驅動內建臉。
+        private static void T_FaceExpression()
+        {
+            Console.WriteLine("\n— T_FaceExpression:臉表情接情緒 —");
+            Check("Login→Warm", App.Counselor.EmpathyGestures.FaceFor(App.Counselor.EmpathyMoment.Login) == FaceExpression.Warm);
+            Check("GreenChat→Happy", App.Counselor.EmpathyGestures.FaceFor(App.Counselor.EmpathyMoment.GreenChat) == FaceExpression.Happy);
+            Check("Probe→Listening", App.Counselor.EmpathyGestures.FaceFor(App.Counselor.EmpathyMoment.Probe) == FaceExpression.Listening);
+            Check("Yellow→Concerned", App.Counselor.EmpathyGestures.FaceFor(App.Counselor.EmpathyMoment.YellowHandoff) == FaceExpression.Concerned);
+            Check("Red→Calm(不用驚恐臉嚇學生)", App.Counselor.EmpathyGestures.FaceFor(App.Counselor.EmpathyMoment.RedHandoff) == FaceExpression.Calm);
+
+            Action<string> noop = _ => { };
+            var body = new SimKebbiBody(noop, canMove: false);
+            var face = new SimFaceExpression();
+            var emp = new App.Counselor.MotorEmpathyBody(body, face: face);
+            emp.Express(App.Counselor.EmpathyMoment.GreenChat);
+            Check("Express(GreenChat)→臉 Happy", face.Last == FaceExpression.Happy);
+            emp.Express(App.Counselor.EmpathyMoment.RedHandoff);
+            Check("Express(RedHandoff)→臉 Calm", face.Last == FaceExpression.Calm);
+            emp.FaceSpeaker();
+            Check("FaceSpeaker→臉 Listening", face.Last == FaceExpression.Listening);
+
+            bool safe = true;
+            try { var e2 = new App.Counselor.MotorEmpathyBody(body); e2.Express(App.Counselor.EmpathyMoment.Login); e2.FaceSpeaker(); } catch { safe = false; }
+            Check("無臉(null)→不丟例外", safe);
         }
 
         private static void T_AngleToDir()

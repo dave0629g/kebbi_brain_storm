@@ -50,6 +50,20 @@ namespace KebbiBrain.App.Counselor
             return isProbe ? EmpathyMoment.Probe : EmpathyMoment.GreenChat;
         }
 
+        // 時機 → 臉部表情(Air S 內建臉)。紅線刻意用 Calm(沉穩關懷,不用驚恐臉嚇到學生)。
+        public static FaceExpression FaceFor(EmpathyMoment moment)
+        {
+            switch (moment)
+            {
+                case EmpathyMoment.Login: return FaceExpression.Warm;
+                case EmpathyMoment.GreenChat: return FaceExpression.Happy;
+                case EmpathyMoment.Probe: return FaceExpression.Listening;
+                case EmpathyMoment.YellowHandoff: return FaceExpression.Concerned;
+                case EmpathyMoment.RedHandoff: return FaceExpression.Calm;
+                default: return FaceExpression.Neutral;
+            }
+        }
+
         public static IReadOnlyList<EmpathyMove> GestureFor(EmpathyMoment moment)
         {
             switch (moment)
@@ -78,13 +92,16 @@ namespace KebbiBrain.App.Counselor
         private readonly IKebbiBody _body;
         private readonly float _speed;
         private readonly bool _useDoa;
+        private readonly IFaceExpression _face;   // Air S 內建臉(可空);Express 時同步切換表情
         // useDoa=false(預設,給 Kebbi Air S 等無 DOA 機型):面向前方。useDoa=true:沿用聲源方向(有 DOA 的機型)。
-        public MotorEmpathyBody(IKebbiBody body, float speed = 35f, bool useDoa = false) { _body = body; _speed = speed; _useDoa = useDoa; }
+        public MotorEmpathyBody(IKebbiBody body, float speed = 35f, bool useDoa = false, IFaceExpression face = null)
+        { _body = body; _speed = speed; _useDoa = useDoa; _face = face; }
 
         public void Express(EmpathyMoment moment)
         {
+            try { _face?.Show(EmpathyGestures.FaceFor(moment)); } catch { }   // 臉表情(同步,即時)
             if (_body == null) return;
-            _ = PlayAsync(EmpathyGestures.GestureFor(moment));
+            _ = PlayAsync(EmpathyGestures.GestureFor(moment));               // 馬達動作(fire-and-forget)
         }
 
         private async Task PlayAsync(IReadOnlyList<EmpathyMove> moves)
@@ -105,6 +122,7 @@ namespace KebbiBrain.App.Counselor
         // 有 DOA 的機型(useDoa:true)→ 讀聲源方向轉頭。SDK 無 DOA 故預設不讀 ReadDoaDegrees。
         public void FaceSpeaker()
         {
+            try { _face?.Show(FaceExpression.Listening); } catch { }   // 學生開口 → 傾聽臉
             if (_body == null) return;
             try { KebbiHead.FaceFully(_body, _useDoa ? _body.ReadDoaDegrees() : 0f); } catch { }
         }
