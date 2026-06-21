@@ -69,6 +69,8 @@ namespace KebbiBrain.Real
         private string _typed = "";
         private bool _busy, _voiceRunning, _ready;
         private string _logPath = "", _cardPath = "";
+        private ReloadableSafetyGate _gate;
+        private string _rulesPath = "";
 
         private IEnumerator Start()
         {
@@ -76,7 +78,18 @@ namespace KebbiBrain.Real
             ISafetyGate gate;
             try
             {
-                gate = new SafetyGateCore(UnityCounselorLoader.ParseRules(rulesJson));
+                // 安全規則:優先讀「老師可維護」的外部檔(persistentDataPath/counselor_rules.json),無檔則用 build 烘進的內建範例。
+                // 可熱重載 → 老師更新關鍵字後按「重載安全規則」即生效;重載失敗保留舊規則(絕不無守門)。內容須輔導專業定稿。
+                _rulesPath = Path.Combine(Application.persistentDataPath, "counselor_rules.json");
+                string bakedRules = rulesJson;
+                Func<IReadOnlyList<SafetyRule>> loadRules = () =>
+                {
+                    string json = bakedRules;
+                    try { if (File.Exists(_rulesPath)) json = File.ReadAllText(_rulesPath); } catch { }
+                    return UnityCounselorLoader.ParseRules(json);
+                };
+                _gate = new ReloadableSafetyGate(loadRules);
+                gate = _gate;
                 _planner = UnityCounselorLoader.ParseTopics(topicsJson);
             }
             catch (Exception e) { _status = "⚠ 設定檔解析失敗: " + e.Message; yield break; }
@@ -168,6 +181,14 @@ namespace KebbiBrain.Real
 
             var st = new GUIStyle(GUI.skin.label) { fontSize = Mathf.Clamp(sh / 52, 16, 30), normal = { textColor = new Color(1f, .9f, .5f) } };
             GUI.Label(new Rect(20, sh * 0.085f, sw * 0.6f, thh), _status + (_busy ? " ⏳" : ""), st);
+
+            // 老師端:更新外部 counselor_rules.json 後按此熱重載安全關鍵字(重載失敗保留舊規則)。
+            if (_gate != null)
+            {
+                var rs = new GUIStyle(GUI.skin.button) { fontSize = Mathf.Clamp(sh / 60, 12, 24) };
+                if (GUI.Button(new Rect(sw * 0.63f, sh * 0.085f, sw * 0.34f, sh * 0.05f), "重載安全規則", rs))
+                { _gate.TryReload(out string rst); _status = rst; }
+            }
 
             // 對話逐句(從 log 取最後幾筆,依層級上色)
             float y = sh * 0.18f;

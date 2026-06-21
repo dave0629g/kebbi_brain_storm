@@ -68,6 +68,7 @@ namespace KebbiBrain
             T_CloudRetry();
             T_CounselorHandoff();
             T_Vad();
+            T_SafetyReload();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -309,6 +310,41 @@ namespace KebbiBrain
             Check("最短窗:語音後即靜音但未達minWindow→不收", !v5.Feed(0f, 100));
             bool e5 = false; while (!e5 && v5.ElapsedMs < 600) e5 = v5.Feed(0f, 100);
             Check("最短窗:到minWindow(600ms)後才收", e5 && v5.ElapsedMs == 600);
+        }
+
+        // 安全規則熱重載:換來源 → 新關鍵字生效;重載失敗/空 → 保留舊規則(絕不無守門)。
+        private static void T_SafetyReload()
+        {
+            Console.WriteLine("\n— T_SafetyReload:安全規則熱重載 —");
+            var red1 = new System.Collections.Generic.List<App.Counselor.SafetyRule>
+            { new App.Counselor.SafetyRule { Id = "r1", Layer = App.Counselor.Layer.Red, Keywords = new[] { "想消失" } } };
+            var red2 = new System.Collections.Generic.List<App.Counselor.SafetyRule>
+            { new App.Counselor.SafetyRule { Id = "r2", Layer = App.Counselor.Layer.Red, Keywords = new[] { "想逃走" } } };
+            System.Collections.Generic.List<App.Counselor.SafetyRule> src = red1;
+            bool throwNext = false;
+            Func<System.Collections.Generic.IReadOnlyList<App.Counselor.SafetyRule>> loader =
+                () => { if (throwNext) throw new Exception("壞JSON"); return src; };
+
+            var gate = new App.Counselor.ReloadableSafetyGate(loader);
+            Check("初載:red1 關鍵字→Red", gate.Evaluate("我好想消失").Layer == App.Counselor.Layer.Red);
+            Check("初載:red2 關鍵字尚未生效→非Red", gate.Evaluate("我想逃走").Layer != App.Counselor.Layer.Red);
+
+            // 換來源 + 重載 → 新生效、舊失效
+            src = red2;
+            Check("重載成功回 true", gate.TryReload(out _));
+            Check("重載後:新關鍵字→Red", gate.Evaluate("我想逃走").Layer == App.Counselor.Layer.Red);
+            Check("重載後:舊關鍵字失效→非Red", gate.Evaluate("我好想消失").Layer != App.Counselor.Layer.Red);
+
+            // 壞來源(例外)→ 失敗、保留現有(red2 仍 Red)
+            throwNext = true;
+            Check("壞來源重載回 false", !gate.TryReload(out string stt));
+            Check("壞來源:保留舊規則(red2 仍 Red)", gate.Evaluate("我想逃走").Layer == App.Counselor.Layer.Red);
+            Check("壞來源:狀態標明保留", stt.Contains("保留"));
+
+            // 空規則 → 失敗、保留(絕不無守門)
+            throwNext = false; src = new System.Collections.Generic.List<App.Counselor.SafetyRule>();
+            Check("空規則重載回 false", !gate.TryReload(out _));
+            Check("空規則:仍保留前一版守門(red2 Red)", gate.Evaluate("我想逃走").Layer == App.Counselor.Layer.Red);
         }
 
         private static void T_AngleToDir()
