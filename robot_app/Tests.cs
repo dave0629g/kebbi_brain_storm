@@ -63,6 +63,7 @@ namespace KebbiBrain
             T_GeminiRobotics();
             T_GeminiLive();
             T_Counselor();
+            T_EmpathyBody();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -81,6 +82,54 @@ namespace KebbiBrain
             body = new SimKebbiBody(noop, canMove: false);
             voice = new SimVoice(noop);
             return new KebbiContext(body, voice, new SimLlm(noop), noop);
+        }
+
+        // 輔導具身共情:燈號/時機 → 動作序列(純函式可斷言)+ FaceSpeaker 真轉頭 + null body 安全。
+        private static void T_EmpathyBody()
+        {
+            Console.WriteLine("\n— T_EmpathyBody:輔導具身共情 —");
+
+            // 安全燈號 + 脈絡 → 共情時機
+            Check("登入→Login", App.Counselor.EmpathyGestures.MomentFor(App.Counselor.Layer.Green, false, true) == App.Counselor.EmpathyMoment.Login);
+            Check("🟢非沉默→GreenChat", App.Counselor.EmpathyGestures.MomentFor(App.Counselor.Layer.Green, false, false) == App.Counselor.EmpathyMoment.GreenChat);
+            Check("🟢沉默→Probe", App.Counselor.EmpathyGestures.MomentFor(App.Counselor.Layer.Green, true, false) == App.Counselor.EmpathyMoment.Probe);
+            Check("🟡→YellowHandoff", App.Counselor.EmpathyGestures.MomentFor(App.Counselor.Layer.Yellow, false, false) == App.Counselor.EmpathyMoment.YellowHandoff);
+            Check("🔴→RedHandoff", App.Counselor.EmpathyGestures.MomentFor(App.Counselor.Layer.Red, false, false) == App.Counselor.EmpathyMoment.RedHandoff);
+
+            // 每個時機:動作非空、幅度保守(|deg|≤25)、停留合理(100–2000ms)
+            bool allSane = true;
+            foreach (App.Counselor.EmpathyMoment mo in Enum.GetValues(typeof(App.Counselor.EmpathyMoment)))
+            {
+                var g = App.Counselor.EmpathyGestures.GestureFor(mo);
+                if (g == null || g.Count == 0) allSane = false;
+                else foreach (var mv in g)
+                    if (Math.Abs(mv.Degrees) > App.Counselor.EmpathyGestures.MaxAbsDeg + 0.01f || mv.HoldMs < 100 || mv.HoldMs > 2000) allSane = false;
+            }
+            Check("所有時機:動作非空、|deg|≤25、停留100–2000ms", allSane);
+
+            // GreenChat 是「點頭」:NeckY 起手 + 最後回中(瞬時不滯留)
+            var green = App.Counselor.EmpathyGestures.GestureFor(App.Counselor.EmpathyMoment.GreenChat);
+            Check("GreenChat 點頭且回中", green.Count >= 2 && green[0].Motor == KebbiMotor.NeckY && Math.Abs(green[green.Count - 1].Degrees) < 0.01f);
+
+            // RedHandoff 最克制:單幀、長停、前傾守住(不彈回)→ 與 GreenChat 形狀不同
+            var red = App.Counselor.EmpathyGestures.GestureFor(App.Counselor.EmpathyMoment.RedHandoff);
+            Check("RedHandoff 單幀長停(沉穩守住)", red.Count == 1 && red[0].HoldMs >= 1000);
+            Check("RedHandoff 與 GreenChat 序列不同", red.Count != green.Count);
+
+            // 執行層:FaceSpeaker 讀 DOA → 真轉頭(NeckZ 朝目標,夾在 ±40)
+            Action<string> noop = _ => { };
+            var body = new SimKebbiBody(noop, canMove: false);
+            var emp = new App.Counselor.MotorEmpathyBody(body);
+            body.CurrentDoa = 30f; emp.FaceSpeaker();
+            Check("FaceSpeaker→NeckZ 朝 DOA(30°可達)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.5f);
+            body.CurrentDoa = 80f; emp.FaceSpeaker();
+            Check("FaceSpeaker→DOA80°夾限到 NeckZ40°", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 40f) < 0.5f);
+
+            // null body → 共情層 no-op、不丟例外(主控台/Sim 路徑完全不受影響)
+            bool nullSafe = true;
+            try { var e2 = new App.Counselor.MotorEmpathyBody(null); e2.Express(App.Counselor.EmpathyMoment.GreenChat); e2.FaceSpeaker(); }
+            catch { nullSafe = false; }
+            Check("null body → 共情 no-op 不丟例外", nullSafe);
         }
 
         private static void T_AngleToDir()

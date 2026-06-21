@@ -17,6 +17,7 @@ namespace KebbiBrain.App.Counselor
         private readonly INotifyHuman _notify;
         private readonly IExplorationPlanner _planner;
         private readonly Action<string> _out;
+        private readonly IEmpathyBody _empathy;   // 具身共情:body 非空(Real)才動作;Sim/主控台=null → no-op
 
         private string _student;
         private ConvMode _mode;
@@ -36,6 +37,7 @@ namespace KebbiBrain.App.Counselor
         {
             _body = body; _voice = voice; _llm = llm; _gate = gate; _log = log; _notify = notify; _planner = planner;
             _out = output ?? Console.WriteLine;
+            _empathy = body != null ? new MotorEmpathyBody(body) : null;   // 真身體在時才接共情動作層
         }
 
         // 登入 + 明確告知「對話會記錄並提供輔導老師」(規格第五、十三節)。第一筆 log Event=Login。
@@ -46,7 +48,7 @@ namespace KebbiBrain.App.Counselor
                 ? "嗨,我是凱比。先跟你說一聲,我們等一下聊的內容我會記錄下來、提供給輔導老師。我們慢慢聊就好,你想說什麼都可以喔。"
                 : disclosure;
             _log.Append(Speaker.Kebbi, _mode, line, Layer.Green, LogEvent.Login);
-            Speak(line);
+            Speak(line, EmpathyMoment.Login);
         }
 
         public void SwitchMode(ConvMode mode)
@@ -61,6 +63,8 @@ namespace KebbiBrain.App.Counselor
             if (Ended) return Layer.Red;
             if (string.IsNullOrWhiteSpace(studentText)) { await ProbeAsync(); return _lastLayer; }
 
+            try { _empathy?.FaceSpeaker(); } catch { }   // 學生開口 → 柔和轉頭面向他(眼神接觸;Sim=null→no-op)
+
             // ① 確定性安全閘先判(完全不進 LLM)
             GateResult g = _gate.Evaluate(studentText);
             _lastLayer = g.Layer;
@@ -74,7 +78,7 @@ namespace KebbiBrain.App.Counselor
                 _notify.CallHumanNow(card);                                  // 即時呼叫現場真人(不只回文字)
                 _log.Append(Speaker.Kebbi, _mode, RedHandoffLine, Layer.Red, LogEvent.RedEscalation);
                 _log.Append(Speaker.Kebbi, _mode, "(已通知現場輔導老師)", Layer.Red, LogEvent.NotifySent);
-                Speak(RedHandoffLine);
+                Speak(RedHandoffLine, EmpathyMoment.RedHandoff);
                 return Layer.Red;
             }
 
@@ -84,7 +88,7 @@ namespace KebbiBrain.App.Counselor
                 LastCard = card;
                 _notify.QueueYellowCard(card);
                 _log.Append(Speaker.Kebbi, _mode, YellowHandoffLine, Layer.Yellow, LogEvent.YellowCard);
-                Speak(YellowHandoffLine);
+                Speak(YellowHandoffLine, EmpathyMoment.YellowHandoff);
                 return Layer.Yellow;
             }
 
@@ -94,7 +98,7 @@ namespace KebbiBrain.App.Counselor
             catch { reply = ""; }
             if (reply.Length == 0) reply = "嗯,我在聽,你想多說一點嗎?";
             _log.Append(Speaker.Kebbi, _mode, reply, Layer.Green, LogEvent.None);
-            Speak(reply);
+            Speak(reply, EmpathyMoment.GreenChat);
             return Layer.Green;
         }
 
@@ -106,7 +110,7 @@ namespace KebbiBrain.App.Counselor
             var t = _planner.NextTopic();
             string line = t != null ? t.OpenerLine : "沒關係,不一定要現在說,我都在這邊陪你。";
             _log.Append(Speaker.Kebbi, _mode, line, Layer.Green, LogEvent.None);
-            Speak(line);
+            Speak(line, EmpathyMoment.Probe);
         }
 
         // 會談結束 → 交接卡摘要給老師(即使全程🟢也給一份)。
@@ -178,11 +182,11 @@ namespace KebbiBrain.App.Counselor
             return sb.ToString();
         }
 
-        private void Speak(string text)
+        private void Speak(string text, EmpathyMoment moment)
         {
             _out("   🤖 凱比" + (_mode == ConvMode.Silent ? "(螢幕)" : "") + ": " + text);
             if (_mode == ConvMode.Voice && _voice != null) { try { _voice.SpeakAsync(text, "zh-TW"); } catch { } }
-            // Real:此處接 _body 做表情/動作共情(點頭/前傾/柔和跟隨)。
+            try { _empathy?.Express(moment); } catch { }   // Real:依燈號/時機做點頭/前傾(免授權 setMotor);Sim/主控台 _empathy=null → no-op
         }
     }
 }

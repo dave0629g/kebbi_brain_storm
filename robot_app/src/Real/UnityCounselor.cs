@@ -83,7 +83,7 @@ namespace KebbiBrain.Real
             _voice = ctx.Voice;
             _log = new SimConversationLog("U" + DateTime.UtcNow.Ticks);
             _notify = new SimNotifyHuman(s => { _alert = s; Debug.Log("[Counselor] " + s); });
-            _sess = new CounselorSession(null, ctx.Voice, ctx.Llm, gate, _log, _notify, _planner, s => Debug.Log("[Counselor] " + s));
+            _sess = new CounselorSession(ctx.Body, ctx.Voice, ctx.Llm, gate, _log, _notify, _planner, s => Debug.Log("[Counselor] " + s));  // ctx.Body→具身共情(真凱比=馬達點頭/前傾/面向;一般 Android=SimKebbiBody no-op)
 
             if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
             {
