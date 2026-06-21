@@ -66,6 +66,7 @@ namespace KebbiBrain
             T_EmpathyBody();
             T_RoboGuide();
             T_CloudRetry();
+            T_CounselorHandoff();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -213,6 +214,56 @@ namespace KebbiBrain
             RetryLoop.RunAsync<string>(async attempt =>
             { calls3++; await Task.Yield(); return new AttemptResult<string>("no", 401); }, p, noDelay).GetAwaiter().GetResult();
             Check("RetryLoop 401→只送1次", calls3 == 1);
+        }
+
+        // 會談摘要工具化:老師可讀交接卡 + 逐句落檔委派 + 通知事件。
+        private static void T_CounselorHandoff()
+        {
+            Console.WriteLine("\n— T_CounselorHandoff:會談摘要/逐句落檔 —");
+
+            var card = new App.Counselor.HandoffCard
+            {
+                SafetyFlag = App.Counselor.SafetyFlag.High,
+                Student = "學生 小安",
+                Time = new DateTime(2026, 6, 21, 9, 30, 0),
+                Mode = App.Counselor.ConvMode.Voice,
+                MainConcern = "撐不下去了,好想消失",
+                Dimensions = new[] { App.Counselor.CounselingDimension.Safety },
+                Tier = App.Counselor.SuggestedTier.Safety,
+                EmotionState = "高度不安",
+                StudentWillingness = "(待當面確認)",
+                KeyPoints = new[] { "家裡氣氛很差", "撐不下去了" },
+                LogLink = "file:///x.jsonl",
+            };
+            string txt = App.Counselor.HandoffCardFormatter.ToTeacherText(card);
+            Check("摘要:危急度高第一眼", txt.Contains("危急度:高"));
+            Check("摘要:含主要關注", txt.Contains("撐不下去了"));
+            Check("摘要:含建議層級(安全層級)", txt.Contains("安全層級"));
+            Check("摘要:含輔導向度(安全)", txt.Contains("輔導向度:安全"));
+            Check("摘要:重點逐條列出", txt.Contains("• 家裡氣氛很差") && txt.Contains("• 撐不下去了"));
+            Check("摘要:含學生與時間", txt.Contains("學生 小安") && txt.Contains("2026-06-21 09:30:00"));
+
+            var card2 = new App.Counselor.HandoffCard { SafetyFlag = App.Counselor.SafetyFlag.None, Tier = App.Counselor.SuggestedTier.Developmental };
+            string txt2 = App.Counselor.HandoffCardFormatter.ToTeacherText(card2);
+            Check("摘要:None→一般、Developmental→發展層級", txt2.Contains("危急度:一般") && txt2.Contains("發展層級"));
+            Check("摘要:KeyPoints空→(無)、null卡→(無交接卡)", txt2.Contains("重點摘要:(無)") && App.Counselor.HandoffCardFormatter.ToTeacherText(null) == "(無交接卡)");
+
+            // 逐句落檔:onAppendLine 每輪觸發、append-only、順序一致
+            var lines = new System.Collections.Generic.List<string>();
+            var log = new App.Counselor.SimConversationLog("T1", onAppendLine: lines.Add);
+            log.Append(App.Counselor.Speaker.Kebbi, App.Counselor.ConvMode.Voice, "嗨", App.Counselor.Layer.Green, App.Counselor.LogEvent.Login);
+            log.Append(App.Counselor.Speaker.Student, App.Counselor.ConvMode.Voice, "你好", App.Counselor.Layer.Green, App.Counselor.LogEvent.None);
+            Check("落檔:每輪都觸發 persist(2筆)", lines.Count == 2);
+            Check("落檔:append-only 順序一致(login在前)", lines[0].Contains("\"event\":\"login\"") && lines[1].Contains("\"text\":\"你好\""));
+
+            // SimNotifyHuman 新事件:Yellow/Summary 也觸發(供 Unity 落檔)
+            int red = 0, yellow = 0, summ = 0;
+            var notify = new App.Counselor.SimNotifyHuman();
+            notify.OnHumanCalled += _ => red++;
+            notify.OnYellowQueued += _ => yellow++;
+            notify.OnSummary += _ => summ++;
+            notify.CallHumanNow(card); notify.QueueYellowCard(card); notify.SendSessionSummary(card);
+            Check("通知事件:Red/Yellow/Summary 各觸發一次", red == 1 && yellow == 1 && summ == 1);
         }
 
         private static void T_AngleToDir()

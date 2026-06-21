@@ -4,6 +4,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Android;
 using KebbiBrain.App.Counselor;
@@ -67,6 +68,7 @@ namespace KebbiBrain.Real
         private string _alert = "";
         private string _typed = "";
         private bool _busy, _voiceRunning, _ready;
+        private string _logPath = "", _cardPath = "";
 
         private IEnumerator Start()
         {
@@ -81,8 +83,20 @@ namespace KebbiBrain.Real
 
             var ctx = KebbiFactory.Create(RobotTarget.Real, Debug.Log);  // UnityVoice(雲端STT/TTS)+ UnityLlm(真 LLM)
             _voice = ctx.Voice;
-            _log = new SimConversationLog("U" + DateTime.UtcNow.Ticks);
+
+            // 逐句記錄落檔 + 交接卡輸出。⚠ 隱私:落在 app 私有 persistentDataPath(僅本機 app 可讀、不外傳);
+            // 「存哪/誰能讀/保存多久」最終須由校方+使用者依隱私規格(第十/十五節)定案,此處先提供機制。
+            string sid = "U" + DateTime.UtcNow.Ticks;
+            string dir = Path.Combine(Application.persistentDataPath, "counselor_logs");
+            try { Directory.CreateDirectory(dir); } catch { }
+            _logPath = Path.Combine(dir, sid + ".jsonl");          // 逐句 append-only(每行一筆 JSON)
+            _cardPath = Path.Combine(dir, sid + "_handoff.txt");   // 交接卡:老師可讀文字 + 機器讀 JSON
+            _log = new SimConversationLog(sid, onAppendLine: AppendLogLine, logLink: "file://" + _logPath);
             _notify = new SimNotifyHuman(s => { _alert = s; Debug.Log("[Counselor] " + s); });
+            _notify.OnHumanCalled += c => WriteCard("🔴 即時呼叫現場真人", c);
+            _notify.OnYellowQueued += c => WriteCard("🟡 待辦交接卡", c);
+            _notify.OnSummary += c => WriteCard("📋 會談結束摘要", c);
+            Debug.Log("[Counselor] 記錄落檔: " + _logPath);
             _sess = new CounselorSession(ctx.Body, ctx.Voice, ctx.Llm, gate, _log, _notify, _planner, s => Debug.Log("[Counselor] " + s));  // ctx.Body→具身共情(真凱比=馬達點頭/前傾/面向;一般 Android=SimKebbiBody no-op)
 
             if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
@@ -187,6 +201,26 @@ namespace KebbiBrain.Real
                 _typed = GUI.TextField(new Rect(16, sh * 0.88f, sw * 0.72f, sh * 0.06f), _typed ?? "", tf);
                 if (GUI.Button(new Rect(sw * 0.74f, sh * 0.88f, sw * 0.22f, sh * 0.06f), "送出")) SendTyped();
             }
+        }
+
+        // 逐句記錄落檔(append-only,每行一筆 JSON)。失敗只記警告,絕不影響對話/安全流程。
+        private void AppendLogLine(string line)
+        {
+            try { File.AppendAllText(_logPath, line + "\n"); }
+            catch (Exception e) { Debug.LogWarning("[Counselor] 記錄寫檔失敗: " + e.Message); }
+        }
+
+        // 交接卡輸出:老師可讀文字摘要 + 機器讀 JSON,各一段、append。
+        private void WriteCard(string kind, HandoffCard card)
+        {
+            try
+            {
+                string block = "==== " + kind + " @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " ====\n"
+                             + HandoffCardFormatter.ToTeacherText(card) + "\n--- JSON ---\n" + card.ToJson() + "\n\n";
+                File.AppendAllText(_cardPath, block);
+                Debug.Log("[Counselor] 交接卡已寫: " + _cardPath);
+            }
+            catch (Exception e) { Debug.LogWarning("[Counselor] 交接卡寫檔失敗: " + e.Message); }
         }
 
         private void OnDestroy()  // 返回選單(重載場景)時停止聆聽迴圈

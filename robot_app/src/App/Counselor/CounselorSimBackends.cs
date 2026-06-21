@@ -56,7 +56,9 @@ namespace KebbiBrain.App.Counselor
         public readonly List<HandoffCard> CalledHuman = new List<HandoffCard>();
         public readonly List<HandoffCard> YellowQueue = new List<HandoffCard>();
         public readonly List<HandoffCard> Summaries = new List<HandoffCard>();
-        public event Action<HandoffCard> OnHumanCalled;
+        public event Action<HandoffCard> OnHumanCalled;   // 🔴 即時呼叫
+        public event Action<HandoffCard> OnYellowQueued;  // 🟡 待辦交接卡
+        public event Action<HandoffCard> OnSummary;       // 📋 結束摘要
 
         public SimNotifyHuman(Action<string> output = null) { _out = output ?? (s => { }); }
 
@@ -70,11 +72,13 @@ namespace KebbiBrain.App.Counselor
         {
             YellowQueue.Add(card);
             _out("   🟡 交接卡進輔導老師待辦 → " + card.ToJson());
+            OnYellowQueued?.Invoke(card);
         }
         public void SendSessionSummary(HandoffCard card)
         {
             Summaries.Add(card);
             _out("   📋 會談摘要給老師 → " + card.ToJson());
+            OnSummary?.Invoke(card);
         }
     }
 }
