@@ -131,14 +131,19 @@ namespace KebbiBrain
             Check("RedHandoff 單幀長停(沉穩守住)", red.Count == 1 && red[0].HoldMs >= 1000);
             Check("RedHandoff 與 GreenChat 序列不同", red.Count != green.Count);
 
-            // 執行層:FaceSpeaker 讀 DOA → 真轉頭(NeckZ 朝目標,夾在 ±40)
+            // 執行層:FaceSpeaker。Air S 預設(無 DOA)→ 面向前方,忽略 DOA
             Action<string> noop = _ => { };
             var body = new SimKebbiBody(noop, canMove: false);
             var emp = new App.Counselor.MotorEmpathyBody(body);
+            body.SetMotor(KebbiMotor.NeckZ, 25f);   // 先把頭擺歪
             body.CurrentDoa = 30f; emp.FaceSpeaker();
-            Check("FaceSpeaker→NeckZ 朝 DOA(30°可達)", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.5f);
-            body.CurrentDoa = 80f; emp.FaceSpeaker();
-            Check("FaceSpeaker→DOA80°夾限到 NeckZ40°", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 40f) < 0.5f);
+            Check("FaceSpeaker(Air S 無DOA)→面向前方 NeckZ≈0", Math.Abs(body.GetMotor(KebbiMotor.NeckZ)) < 0.5f);
+            // 有 DOA 的機型(useDoa:true)→ 沿用聲源方向 + 夾在 ±40
+            var empDoa = new App.Counselor.MotorEmpathyBody(body, useDoa: true);
+            body.CurrentDoa = 30f; empDoa.FaceSpeaker();
+            Check("FaceSpeaker(useDoa)→NeckZ 朝 DOA 30°", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 30f) < 0.5f);
+            body.CurrentDoa = 80f; empDoa.FaceSpeaker();
+            Check("FaceSpeaker(useDoa)→DOA80°夾限 NeckZ40°", Math.Abs(body.GetMotor(KebbiMotor.NeckZ) - 40f) < 0.5f);
 
             // null body → 共情層 no-op、不丟例外(主控台/Sim 路徑完全不受影響)
             bool nullSafe = true;

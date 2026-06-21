@@ -77,7 +77,9 @@ namespace KebbiBrain.App.Counselor
     {
         private readonly IKebbiBody _body;
         private readonly float _speed;
-        public MotorEmpathyBody(IKebbiBody body, float speed = 35f) { _body = body; _speed = speed; }
+        private readonly bool _useDoa;
+        // useDoa=false(預設,給 Kebbi Air S 等無 DOA 機型):面向前方。useDoa=true:沿用聲源方向(有 DOA 的機型)。
+        public MotorEmpathyBody(IKebbiBody body, float speed = 35f, bool useDoa = false) { _body = body; _speed = speed; _useDoa = useDoa; }
 
         public void Express(EmpathyMoment moment)
         {
@@ -99,10 +101,12 @@ namespace KebbiBrain.App.Counselor
             catch { /* 共情動作純加分,失敗忽略 */ }
         }
 
+        // 學生開口 → 把頭轉向他。Air S(無 DOA、桌上型、學生在正前方)→ 面向前方(NeckZ→0,attentive 回正);
+        // 有 DOA 的機型(useDoa:true)→ 讀聲源方向轉頭。SDK 無 DOA 故預設不讀 ReadDoaDegrees。
         public void FaceSpeaker()
         {
             if (_body == null) return;
-            try { KebbiHead.FaceFully(_body, _body.ReadDoaDegrees()); } catch { }
+            try { KebbiHead.FaceFully(_body, _useDoa ? _body.ReadDoaDegrees() : 0f); } catch { }
         }
 
         private static float Clamp(float v, float lo, float hi) => v < lo ? lo : (v > hi ? hi : v);
