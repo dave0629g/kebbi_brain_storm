@@ -75,6 +75,7 @@ namespace KebbiBrain
             T_StoryCircle();
             T_LiveResume();
             T_SecretsCheck();
+            T_Preflight();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -594,6 +595,42 @@ namespace KebbiBrain
             Check("Check 空→Ok=false、提示未設定", !s1.Ok && s1.Hint.Contains("未設定"));
             var s2 = SecretsCheck.Check("Gemini", "AIzaSyB1c2D3e4F5g6H7i8J9k0L1m2N3o4P5q6");
             Check("Check 真金鑰→Ok=true", s2.Ok && !s2.Hint.Contains("佔位"));
+        }
+
+        // 開機自檢:功能→所需資源對映 + 聚合 + 串接 SecretsCheck。
+        private static void T_Preflight()
+        {
+            Console.WriteLine("\n— T_Preflight:開機自檢 —");
+            bool Has(System.Collections.Generic.IReadOnlyList<PreflightItem> l, PreflightItem x)
+            { foreach (var i in l) if (i == x) return true; return false; }
+
+            // 需求對映
+            var liveReq = PreflightCore.RequirementsFor("LiveConversation");
+            Check("LiveConversation 需 Gemini金鑰+麥克風", liveReq.Count == 2 && Has(liveReq, PreflightItem.GeminiKey) && Has(liveReq, PreflightItem.Microphone));
+            var visReq = PreflightCore.RequirementsFor("RoboticsVision");
+            Check("RoboticsVision 需 Gemini金鑰+相機", Has(visReq, PreflightItem.GeminiKey) && Has(visReq, PreflightItem.Camera));
+            var counReq = PreflightCore.RequirementsFor("Counselor");
+            Check("Counselor 需 LLM+語音+麥克風", Has(counReq, PreflightItem.LlmKey) && Has(counReq, PreflightItem.SpeechKey) && Has(counReq, PreflightItem.Microphone));
+            Check("未知功能→無需求", PreflightCore.RequirementsFor("X").Count == 0);
+
+            // 聚合
+            var r1 = PreflightCore.Evaluate(liveReq, _ => true);
+            Check("全現況 ok → AllOk", PreflightCore.AllOk(r1) && r1.Count == 2);
+            Func<PreflightItem, bool> noMic = it => it != PreflightItem.Microphone;
+            var r2 = PreflightCore.Evaluate(liveReq, noMic);
+            Check("缺麥克風→AllOk=false", !PreflightCore.AllOk(r2));
+            var failing = PreflightCore.Failing(r2);
+            Check("Failing 列出麥克風權限", failing.Count == 1 && failing[0] == "麥克風權限");
+            bool micHintOk = false;
+            foreach (var r in r2) if (r.Item == PreflightItem.Microphone) micHintOk = r.Hint == "未授權";
+            Check("未過項 Hint=未授權", micHintOk);
+            Check("Label: GeminiKey→Gemini 金鑰", PreflightCore.Label(PreflightItem.GeminiKey) == "Gemini 金鑰");
+
+            // 串接 SecretsCheck
+            Check("串接:真 Gemini 金鑰→該項 ok",
+                PreflightCore.AllOk(PreflightCore.Evaluate(new[] { PreflightItem.GeminiKey }, it => SecretsCheck.IsUsable("AIzaSyB1c2D3e4F5g6H7i8J9k0L1m2N3o4P5q6"))));
+            Check("串接:佔位 Gemini 金鑰→該項 fail",
+                !PreflightCore.AllOk(PreflightCore.Evaluate(new[] { PreflightItem.GeminiKey }, it => SecretsCheck.IsUsable("YOUR_KEY"))));
         }
 
         private static void T_AngleToDir()

@@ -84,6 +84,14 @@ namespace KebbiBrain.Real
 
         private void Launch(Item it)
         {
+            // 開機自檢:這個功能要的金鑰/權限/網路缺什麼,先 log 標出(非工程的人也能自助排除「點下去沒反應」)。
+            // 非阻塞:仍照常啟動(部分功能可降級;真正缺項由功能自身 UI 再提示)。
+            var pf = KebbiBrain.Hardware.PreflightCore.Evaluate(
+                KebbiBrain.Hardware.PreflightCore.RequirementsFor(it.Mode.ToString()), PreflightOk);
+            foreach (var r in pf) Debug.Log("[Menu][自檢] " + it.Label + " · " + r.Label + ": " + (r.Ok ? "OK" : "缺 — " + r.Hint));
+            var fail = KebbiBrain.Hardware.PreflightCore.Failing(pf);
+            if (fail.Count > 0) _note = it.Label + " 可能無法正常運作,缺:" + string.Join("、", fail.ToArray());
+
             _launched = true;
             var go = new GameObject("Kebbi");
             var kab = go.AddComponent<KebbiAppBehaviour>();
@@ -98,6 +106,21 @@ namespace KebbiBrain.Real
             if (!it.FullScreenUi) go.AddComponent<ScreenLogHud>(); // 沒有自己滿版 UI 的功能 → 加文字 HUD 看輸出
             Debug.Log("[Menu] 啟動功能: " + it.Mode);
             // KebbiAppBehaviour.Start 會自動跑該 Mode。
+        }
+
+        // 開機自檢:各資源現況(金鑰走 SecretsCheck、權限走 Permission、網路走 internetReachability)。
+        private bool PreflightOk(KebbiBrain.Hardware.PreflightItem item)
+        {
+            switch (item)
+            {
+                case KebbiBrain.Hardware.PreflightItem.SpeechKey: return KebbiBrain.Hardware.SecretsCheck.IsUsable(Config.SpeechKey);
+                case KebbiBrain.Hardware.PreflightItem.LlmKey: return KebbiBrain.Hardware.SecretsCheck.IsUsable(Config.LlmKey);
+                case KebbiBrain.Hardware.PreflightItem.GeminiKey: return KebbiBrain.Hardware.SecretsCheck.IsUsable(Config.GeminiKey);
+                case KebbiBrain.Hardware.PreflightItem.Microphone: return UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone);
+                case KebbiBrain.Hardware.PreflightItem.Camera: return UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Camera);
+                case KebbiBrain.Hardware.PreflightItem.Network: return Application.internetReachability != NetworkReachability.NotReachable;
+                default: return true;
+            }
         }
     }
 }
