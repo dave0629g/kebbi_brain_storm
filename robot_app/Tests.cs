@@ -74,6 +74,7 @@ namespace KebbiBrain
             T_Touch();
             T_StoryCircle();
             T_LiveResume();
+            T_SecretsCheck();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -565,6 +566,34 @@ namespace KebbiBrain
             Check("goAway→ShouldReconnect", st.ShouldReconnect(g));
             Check("有 handle→NextSetup 帶 handle 接續同 session", st.NextSetupJson("m", "s").Contains("\"handle\":\"abc123\""));
             Check("一般訊息→不重連", !st.ShouldReconnect(App.GeminiLiveProtocol.TryParseServer("{\"serverContent\":{\"turnComplete\":true}}")));
+        }
+
+        // 金鑰佔位偵測:空/短/範例值→佔位;真金鑰樣態→可用。
+        private static void T_SecretsCheck()
+        {
+            Console.WriteLine("\n— T_SecretsCheck:金鑰佔位偵測 —");
+            Check("空字串→佔位", SecretsCheck.IsPlaceholder(""));
+            Check("空白→佔位", SecretsCheck.IsPlaceholder("   "));
+            Check("null→佔位", SecretsCheck.IsPlaceholder(null));
+            Check("YOUR_API_KEY→佔位", SecretsCheck.IsPlaceholder("YOUR_API_KEY"));
+            Check("<your-key-here>→佔位", SecretsCheck.IsPlaceholder("<your-key-here>"));
+            Check("changeme→佔位", SecretsCheck.IsPlaceholder("changeme123456"));
+            Check("你的金鑰→佔位", SecretsCheck.IsPlaceholder("你的金鑰放這裡"));
+            Check("太短→佔位", SecretsCheck.IsPlaceholder("abc123"));
+            Check("全同字元→佔位", SecretsCheck.IsPlaceholder("aaaaaaaaaaaaaa"));
+            Check("...→佔位", SecretsCheck.IsPlaceholder("..."));
+
+            // 真金鑰樣態 → 可用(不誤判)
+            Check("OpenAI 樣態→可用", SecretsCheck.IsUsable("sk-proj-9aXb2Kd8Lm4Nq7Rs1Tv6Wy3Zc5Ef0Gh"));
+            Check("Anthropic 樣態→可用", SecretsCheck.IsUsable("sk-ant-api03-Qw9Er2Ty7Ui4Op1As6Df3Gh"));
+            Check("Gemini 樣態→可用", SecretsCheck.IsUsable("AIzaSyB1c2D3e4F5g6H7i8J9k0L1m2N3o4P5q6"));
+            Check("Azure 32hex 樣態→可用", SecretsCheck.IsUsable("0a1b2c3d4e5f60718293a4b5c6d7e8f9"));
+
+            // Check 回報(不含金鑰值)
+            var s1 = SecretsCheck.Check("LLM Key", "");
+            Check("Check 空→Ok=false、提示未設定", !s1.Ok && s1.Hint.Contains("未設定"));
+            var s2 = SecretsCheck.Check("Gemini", "AIzaSyB1c2D3e4F5g6H7i8J9k0L1m2N3o4P5q6");
+            Check("Check 真金鑰→Ok=true", s2.Ok && !s2.Hint.Contains("佔位"));
         }
 
         private static void T_AngleToDir()

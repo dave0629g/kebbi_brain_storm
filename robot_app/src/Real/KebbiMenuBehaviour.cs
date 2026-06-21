@@ -28,6 +28,15 @@ namespace KebbiBrain.Real
             if (secrets != null) secrets.ApplyToConfig();
             else Debug.LogWarning("[Menu] 未指定 secrets,雲端功能會缺金鑰。");
 
+            // 金鑰盤點:把「沒設/還是範例值」一眼標出(不印任何金鑰值),非工程的人也能自助排除。
+            int missingKeys = 0;
+            foreach (var k in KebbiBrain.Hardware.SecretsCheck.ReportConfig())
+            {
+                Debug.Log("[Menu][金鑰] " + k.Name + ": " + (k.Ok ? "OK " : "缺 ") + k.Hint);
+                if (!k.Ok) missingKeys++;
+            }
+            if (missingKeys > 0) _note = "注意:有 " + missingKeys + " 個金鑰未設定/疑似佔位,相關雲端功能會失敗(詳見 log)";
+
             _items = new[]
             {
                 new Item{ Label="輔導室陪伴機器人", Mode=KebbiAppBehaviour.Mode.Counselor, Lang="zh-TW", Name="凱比", Char="溫暖、穩、接得住的陪伴者", FullScreenUi=true },
