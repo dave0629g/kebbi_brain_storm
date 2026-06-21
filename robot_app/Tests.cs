@@ -71,6 +71,7 @@ namespace KebbiBrain
             T_SafetyReload();
             T_UdpLoopback();
             T_TranslateRelay();
+            T_Touch();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -453,6 +454,40 @@ namespace KebbiBrain
 
             // RunAsync:連續空窗達 maxEmpty 即停(不空轉)
             Check("RunAsync 連續空窗→停止不空轉", mA.RunAsync(0, 3).Wait(3000));
+        }
+
+        // 觸控輸入層:意圖映射 + Sim 事件/輪詢 + 握手交棒 token。
+        private static void T_Touch()
+        {
+            Console.WriteLine("\n— T_Touch:觸控輸入 + 交棒 —");
+
+            // 意圖映射(純函式)
+            Check("摸頭→正向回饋", TouchIntents.Meaning(TouchZone.Head) == TouchMeaning.PositiveFeedback);
+            Check("握手(左/右)→交棒", TouchIntents.Meaning(TouchZone.HandLeft) == TouchMeaning.Handoff && TouchIntents.Meaning(TouchZone.HandRight) == TouchMeaning.Handoff);
+            Check("摸肚子→逗趣", TouchIntents.Meaning(TouchZone.Belly) == TouchMeaning.Playful);
+            Check("None→None", TouchIntents.Meaning(TouchZone.None) == TouchMeaning.None);
+
+            // Sim 事件模式(有訂閱者 → 立即回呼,不進佇列)
+            var s1 = new SimTouchSensor();
+            var got = new System.Collections.Generic.List<TouchZone>();
+            s1.OnTouch(z => got.Add(z));
+            s1.Emit(TouchZone.Head); s1.Emit(TouchZone.HandLeft);
+            Check("事件模式:訂閱者即時收到兩次", got.Count == 2 && got[0] == TouchZone.Head && got[1] == TouchZone.HandLeft);
+            Check("事件模式下 Poll 取不到(已走回呼)", !s1.Poll(out _));
+
+            // Sim 輪詢模式(無訂閱者 → 進佇列,依序取出)
+            var s2 = new SimTouchSensor();
+            s2.Emit(TouchZone.Belly); s2.Emit(TouchZone.Head);
+            Check("輪詢模式:依序取出後排空",
+                s2.Poll(out var z1) && z1 == TouchZone.Belly && s2.Poll(out var z2) && z2 == TouchZone.Head && !s2.Poll(out _));
+
+            // 握手交棒 floor token
+            var tok = new TouchTurnToken(startWithFloor: true);
+            Check("持發言權時握手→交出(回 true、Passes=1)", tok.OnTouch(TouchZone.HandRight) && !tok.HasFloor && tok.Passes == 1);
+            Check("無發言權時握手→不交(回 false)", !tok.OnTouch(TouchZone.HandLeft) && !tok.HasFloor);
+            Check("摸頭不交棒", !new TouchTurnToken(true).OnTouch(TouchZone.Head));
+            tok.Grab();
+            Check("被交棒回來→重獲發言權", tok.HasFloor);
         }
 
         private static void T_AngleToDir()
