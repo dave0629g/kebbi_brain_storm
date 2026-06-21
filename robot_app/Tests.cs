@@ -76,6 +76,7 @@ namespace KebbiBrain
             T_LiveResume();
             T_SecretsCheck();
             T_Preflight();
+            T_LiveToken();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -631,6 +632,21 @@ namespace KebbiBrain
                 PreflightCore.AllOk(PreflightCore.Evaluate(new[] { PreflightItem.GeminiKey }, it => SecretsCheck.IsUsable("AIzaSyB1c2D3e4F5g6H7i8J9k0L1m2N3o4P5q6"))));
             Check("串接:佔位 Gemini 金鑰→該項 fail",
                 !PreflightCore.AllOk(PreflightCore.Evaluate(new[] { PreflightItem.GeminiKey }, it => SecretsCheck.IsUsable("YOUR_KEY"))));
+        }
+
+        // Gemini Live ephemeral token client 接口:明文 key URL vs access_token URL。
+        private static void T_LiveToken()
+        {
+            Console.WriteLine("\n— T_LiveToken:Live ephemeral token 接口 —");
+            string keyUrl = App.GeminiLiveProtocol.WsUrl("MYKEY123");
+            string tokUrl = App.GeminiLiveProtocol.WsUrlEphemeral("TOK_abc");
+
+            Check("WsUrl 明文金鑰走 ?key=", keyUrl.Contains("?key=MYKEY123") && keyUrl.StartsWith("wss://"));
+            Check("WsUrlEphemeral 走 ?access_token=", tokUrl.Contains("?access_token=TOK_abc"));
+            Check("ephemeral URL 不含明文 ?key=", !tokUrl.Contains("?key="));
+            Check("ephemeral 用 v1alpha、明文用 v1beta", tokUrl.Contains(".v1alpha.") && keyUrl.Contains(".v1beta."));
+            Check("IsPlaintextKeyUrl:明文 true、ephemeral false", App.GeminiLiveProtocol.IsPlaintextKeyUrl(keyUrl) && !App.GeminiLiveProtocol.IsPlaintextKeyUrl(tokUrl));
+            Check("null 安全(不丟例外)", App.GeminiLiveProtocol.WsUrl(null).Contains("?key=") && App.GeminiLiveProtocol.WsUrlEphemeral(null).Contains("?access_token="));
         }
 
         private static void T_AngleToDir()

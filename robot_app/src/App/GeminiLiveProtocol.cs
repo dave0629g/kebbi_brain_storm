@@ -32,8 +32,21 @@ namespace KebbiBrain.App
         public const int InputRate = 16000;                         // 上行取樣率
         public const int OutputRate = 24000;                        // 下行取樣率(模型回的音訊)
 
+        private static string WsBase(string version)
+            => "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage." + version + ".GenerativeService.BidiGenerateContent";
+
+        // 明文金鑰走法(現況):key 直接進 URL → 對外展示有外洩風險(URL 可能被 log/快取)。
         public static string WsUrl(string apiKey)
-            => "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + (apiKey ?? "");
+            => WsBase("v1beta") + "?key=" + (apiKey ?? "");
+
+        // ephemeral token 走法(建議對外用):用後端短期簽發的 access_token 取代明文金鑰,降外洩風險。
+        // ⚠ token 由後端 minted(需 Google Cloud 開帳單 + 簽發端點)= 「需你決策」;此處先備 client 接口。
+        //   端點版本以 Google Live API ephemeral token 文件為準(目前 v1alpha);上線前對齊。
+        public static string WsUrlEphemeral(string accessToken)
+            => WsBase("v1alpha") + "?access_token=" + (accessToken ?? "");
+
+        // 是否為明文金鑰直連(對外展示前應改用 ephemeral token)。
+        public static bool IsPlaintextKeyUrl(string url) => !string.IsNullOrEmpty(url) && url.Contains("?key=");
 
         // setup 訊息:對話用(非翻譯)→ 一個 persona system instruction + AUDIO 輸出 + 原文/譯文逐字稿。
         //   一律帶 sessionResumption(空=請 server 開始發 resumption handle)→ 斷線可無縫重連。

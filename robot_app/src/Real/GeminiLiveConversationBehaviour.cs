@@ -22,6 +22,7 @@ namespace KebbiBrain.Real
     public sealed class GeminiLiveConversationBehaviour : MonoBehaviour
     {
         public string apiKey = "";
+        public string ephemeralToken = "";  // 設了就用 ephemeral token 連線(取代明文 apiKey,降外洩);由後端短期簽發(需開帳單,屬「需你決策」)
         public string model = GeminiLiveProtocol.DefaultModel;
         public string systemInstruction = "你是凱比,一個親切的教育機器人。只用繁體中文(台灣)講話,每次一兩句、簡短自然、會鼓勵小朋友。";
         public bool gateMicWhileSpeaking = true;  // Kebbi 講話時不送麥克風(無 AEC 防回授);戴耳機可設 false 做全雙工
@@ -82,7 +83,9 @@ namespace KebbiBrain.Real
             try
             {
                 _ws = new ClientWebSocket();
-                await _ws.ConnectAsync(new Uri(GeminiLiveProtocol.WsUrl(apiKey)), _cts.Token);
+                // 有 ephemeral token 就用它(對外展示建議),否則退回明文金鑰直連。
+                string wsUrl = string.IsNullOrEmpty(ephemeralToken) ? GeminiLiveProtocol.WsUrl(apiKey) : GeminiLiveProtocol.WsUrlEphemeral(ephemeralToken);
+                await _ws.ConnectAsync(new Uri(wsUrl), _cts.Token);
                 await SendRawAsync(GeminiLiveProtocol.BuildSetupJson(model, systemInstruction));
                 _ = Task.Run(ReceiveLoop);
                 _ = Task.Run(SendLoop);
