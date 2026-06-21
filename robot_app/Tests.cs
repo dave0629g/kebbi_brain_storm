@@ -70,6 +70,7 @@ namespace KebbiBrain
             T_Vad();
             T_SafetyReload();
             T_UdpLoopback();
+            T_TranslateRelay();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -392,6 +393,66 @@ namespace KebbiBrain
             }
             catch (Exception e) { Check("UDP環回:測試例外(" + e.Message + ")", false); }
             finally { try { if (rx != null) rx.Close(); } catch { } try { if (tx != null) tx.Close(); } catch { } }
+        }
+
+        // 假語音/假翻譯:供雙機口譯橋測試。
+        private sealed class RelayVoice : IVoice
+        {
+            public readonly System.Collections.Generic.Queue<string> Heard = new System.Collections.Generic.Queue<string>();
+            public string LastSpoken, LastLang;
+            public Task SpeakAsync(string text, string lang = "id-ID") { LastSpoken = text; LastLang = lang; return Task.CompletedTask; }
+            public Task<string> ListenAsync(string lang = "id-ID") => Task.FromResult(Heard.Count > 0 ? Heard.Dequeue() : "");
+        }
+        private sealed class RelayLlm : ILlm
+        {
+            public string LastSystem, LastUser;
+            public Task<string> AskAsync(string system, string user) { LastSystem = system; LastUser = user; return Task.FromResult("T:" + user); }
+        }
+
+        // 雙機口譯橋:聽→譯→送對方機說出。SimRobotBus 同步遞送 + 假語音/翻譯 → 端到端可斷言。
+        private static void T_TranslateRelay()
+        {
+            Console.WriteLine("\n— T_TranslateRelay:雙機口譯橋 —");
+            Action<string> noop = _ => { };
+
+            // 純函式
+            string sys = App.TranslateRelayGame.TranslateSystem("zh-TW", "id-ID");
+            Check("TranslateSystem 含 from/to 語言", sys.Contains("繁體中文") && sys.Contains("印尼語"));
+            Check("LangName: id→印尼語、zh→繁中、en→英語",
+                App.TranslateRelayGame.LangName("id-ID") == "印尼語" && App.TranslateRelayGame.LangName("zh-TW").Contains("繁體中文") && App.TranslateRelayGame.LangName("en-US") == "英語");
+            Check("IsRelay 辨識 TX|、排除 CV|/空",
+                App.TranslateRelayGame.IsRelay("TX|halo") && !App.TranslateRelayGame.IsRelay("CV|x") && !App.TranslateRelayGame.IsRelay(""));
+
+            // 雙機端到端
+            var bus = new SimRobotBus(noop);
+            var vA = new RelayVoice();   // 老師端(zh)
+            var vB = new RelayVoice();   // 學生端(id)
+            var llmA = new RelayLlm();
+            var llmB = new RelayLlm();
+            var mA = new App.TranslateRelayGame(vA, llmA, bus.CreateLink("A"), "zh-TW", "id-ID", "B", noop);
+            var mB = new App.TranslateRelayGame(vB, llmB, bus.CreateLink("B"), "id-ID", "zh-TW", "A", noop);
+            mA.AttachSpeaker(); mB.AttachSpeaker();
+
+            // 老師說中文 → 學生端機說出印尼語譯文
+            vA.Heard.Enqueue("你好,請坐下");
+            string tx1 = mA.RelayOnceAsync().GetAwaiter().GetResult();
+            Check("老師→學生:有送出譯文", tx1 != null);
+            Check("學生端機說出該譯文(id)", vB.LastSpoken == tx1 && vB.LastLang == "id-ID");
+            Check("翻譯方向:老師端 system 目標=印尼語", llmA.LastSystem.Contains("印尼語"));
+            Check("計數:A 轉譯1、B 說出1", mA.Relayed == 1 && mB.Spoken == 1);
+
+            // 學生說印尼語 → 老師端機說出中文譯文
+            vB.Heard.Enqueue("Halo, pak");
+            string tx2 = mB.RelayOnceAsync().GetAwaiter().GetResult();
+            Check("學生→老師:老師端機說出中文譯文", vA.LastSpoken == tx2 && vA.LastLang == "zh-TW");
+            Check("反向翻譯:學生端 system 目標=繁體中文", llmB.LastSystem.Contains("繁體中文"));
+
+            // 沒人說話 → 不送、回 null,計數不增
+            string tx3 = mA.RelayOnceAsync().GetAwaiter().GetResult();
+            Check("無人說話→不送、回 null", tx3 == null && mA.Relayed == 1);
+
+            // RunAsync:連續空窗達 maxEmpty 即停(不空轉)
+            Check("RunAsync 連續空窗→停止不空轉", mA.RunAsync(0, 3).Wait(3000));
         }
 
         private static void T_AngleToDir()
