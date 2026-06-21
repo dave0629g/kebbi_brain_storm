@@ -30,6 +30,8 @@ namespace KebbiBrain.Real
         private ClientWebSocket _ws;
         private CancellationTokenSource _cts;
         private readonly ConcurrentQueue<string> _sendQ = new ConcurrentQueue<string>();
+        private readonly LiveResumeState _resume = new LiveResumeState();  // 斷線重連:存 resumption handle
+        private bool _paused;                                              // 背景化時暫停送麥克風音訊
         private volatile bool _setupDone;
         private volatile string _status = "啟動中…";
         private volatile string _userText = "", _kebbiText = "";
@@ -134,6 +136,8 @@ namespace KebbiBrain.Real
         private void HandleServer(string json)
         {
             var m = GeminiLiveProtocol.TryParseServer(json);
+            _resume.Observe(m);   // 存最新 resumption handle / goAway 剩餘時間(供斷線無縫重連;完整重連迴圈列真機後續)
+            if (m.GoAway) { _status = "⚠ 伺服器將斷線(timeLeft=" + (m.GoAwayTimeLeft ?? "?") + "),handle 已備妥"; Debug.LogWarning("[Live] " + _status); }
             if (m.SetupComplete) { _setupDone = true; _status = "握手完成,開始對話 🎙️"; }
             if (m.Interrupted) { Interlocked.Exchange(ref _rIdx, Interlocked.Read(ref _wIdx)); } // barge-in:丟掉還沒播的
             if (!string.IsNullOrEmpty(m.InputText)) _userText = m.InputText;
@@ -214,9 +218,12 @@ namespace KebbiBrain.Real
 
         private bool KebbiSpeaking => Interlocked.Read(ref _wIdx) - Interlocked.Read(ref _rIdx) > _outRate / 20; // ring 還有 >50ms 要播
 
+        // 背景化:暫停送麥克風音訊(回前景自動恢復)。避免背景時麥克風/送音行為未定義(OnApplicationPause 原本零命中)。
+        private void OnApplicationPause(bool pause) { _paused = pause; }
+
         private void Update()
         {
-            if (_micClip == null || !_setupDone) return;
+            if (_micClip == null || !_setupDone || _paused) return;
             // 讀麥克風新增的 sample(環形,處理 wraparound)
             int pos = Microphone.GetPosition(_micDev);
             int clipLen = _micClip.samples;

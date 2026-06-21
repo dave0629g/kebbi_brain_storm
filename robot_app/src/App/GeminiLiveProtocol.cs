@@ -13,6 +13,8 @@ namespace KebbiBrain.App
         public bool Interrupted;        // 被使用者打斷(barge-in)→ 該停掉正在播的音
         public bool SetupComplete;      // setupComplete:握手完成
         public bool GoAway;             // 連線即將結束(該重連)
+        public string GoAwayTimeLeft;    // goAway.timeLeft(剩多久,如 "10s";可空)
+        public string ResumptionHandle;  // sessionResumptionUpdate.newHandle(存起來,斷線用它無縫重連;可空)
     }
 
     // Gemini Live API(即時語音對話)協定層。純 C#(無 UnityEngine、無第三方 JSON lib)→ 主控台可單測、Unity 也直接用。
@@ -34,7 +36,15 @@ namespace KebbiBrain.App
             => "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + (apiKey ?? "");
 
         // setup 訊息:對話用(非翻譯)→ 一個 persona system instruction + AUDIO 輸出 + 原文/譯文逐字稿。
+        //   一律帶 sessionResumption(空=請 server 開始發 resumption handle)→ 斷線可無縫重連。
         public static string BuildSetupJson(string model, string systemInstruction)
+            => BuildSetupCore(model, systemInstruction, null);
+
+        // 重連用:帶上次存到的 resumption handle → 接續同一個 session(不從頭)。
+        public static string BuildResumeSetupJson(string model, string systemInstruction, string resumeHandle)
+            => BuildSetupCore(model, systemInstruction, resumeHandle);
+
+        private static string BuildSetupCore(string model, string systemInstruction, string resumeHandle)
         {
             string m = string.IsNullOrEmpty(model) ? DefaultModel : model;
             if (!m.StartsWith("models/")) m = "models/" + m;
@@ -45,7 +55,11 @@ namespace KebbiBrain.App
             if (!string.IsNullOrEmpty(systemInstruction))
                 sb.Append("\"systemInstruction\":{\"parts\":[{\"text\":\"").Append(Esc(systemInstruction)).Append("\"}]},");
             sb.Append("\"inputAudioTranscription\":{},");
-            sb.Append("\"outputAudioTranscription\":{}");
+            sb.Append("\"outputAudioTranscription\":{},");
+            sb.Append("\"sessionResumption\":{");      // 啟用斷線重連
+            if (!string.IsNullOrEmpty(resumeHandle))
+                sb.Append("\"handle\":\"").Append(Esc(resumeHandle)).Append("\"");
+            sb.Append("}");
             sb.Append("}}");
             return sb.ToString();
         }
@@ -71,13 +85,24 @@ namespace KebbiBrain.App
             var r = new LiveServerMsg();
             if (string.IsNullOrEmpty(json)) return r;
             if (json.IndexOf("\"setupComplete\"", StringComparison.Ordinal) >= 0) r.SetupComplete = true;
-            if (json.IndexOf("\"goAway\"", StringComparison.Ordinal) >= 0) r.GoAway = true;
+            if (json.IndexOf("\"goAway\"", StringComparison.Ordinal) >= 0) { r.GoAway = true; r.GoAwayTimeLeft = ScanStringValue(json, "\"timeLeft\""); }
             if (json.IndexOf("\"turnComplete\":true", StringComparison.Ordinal) >= 0) r.TurnComplete = true;
             if (json.IndexOf("\"interrupted\":true", StringComparison.Ordinal) >= 0) r.Interrupted = true;
             r.OutputText = ScanNestedText(json, "\"outputTranscription\"");
             r.InputText = ScanNestedText(json, "\"inputTranscription\"");
             r.AudioBase64 = ScanInlineAudio(json);
+            r.ResumptionHandle = ScanStringValue(json, "\"newHandle\"");   // sessionResumptionUpdate.newHandle → 存起來重連用
             return r;
+        }
+
+        // 找 <key>:"<值>" 的字串值(通用,用於 newHandle/timeLeft)。
+        private static string ScanStringValue(string s, string key)
+        {
+            int k = s.IndexOf(key, StringComparison.Ordinal);
+            if (k < 0) return null;
+            int colon = s.IndexOf(':', k + key.Length);
+            if (colon < 0) return null;
+            return ReadString(s, colon + 1);
         }
 
         // 找 <key>:{... "text":"..." ...} 裡的 text(用於 input/outputTranscription)。
@@ -198,5 +223,31 @@ namespace KebbiBrain.App
             }
             return sb.ToString();
         }
+    }
+
+    // Gemini Live 斷線重連狀態機(純,可斷言)。觀察每則 server 訊息存下最新 resumption handle;
+    // session 逾時(goAway)或 WS 掉線時,用 NextSetupJson() 帶 handle 重連 → 接續同一 session、不從頭。
+    public sealed class LiveResumeState
+    {
+        public string Handle { get; private set; }      // 最新 resumption handle(尚無→null)
+        public string LastTimeLeft { get; private set; } // 最近一次 goAway 的剩餘時間
+
+        // 吃一則 server 訊息:更新 handle / 記 goAway 剩餘時間。
+        public void Observe(LiveServerMsg m)
+        {
+            if (!string.IsNullOrEmpty(m.ResumptionHandle)) Handle = m.ResumptionHandle;
+            if (m.GoAway && !string.IsNullOrEmpty(m.GoAwayTimeLeft)) LastTimeLeft = m.GoAwayTimeLeft;
+        }
+
+        // 該重連嗎?(server 說即將結束)
+        public bool ShouldReconnect(LiveServerMsg m) => m.GoAway;
+
+        // 重連用的 setup:有 handle → 帶 handle 接續;否則全新 setup(server 會再發新 handle)。
+        public string NextSetupJson(string model, string systemInstruction)
+            => string.IsNullOrEmpty(Handle)
+             ? GeminiLiveProtocol.BuildSetupJson(model, systemInstruction)
+             : GeminiLiveProtocol.BuildResumeSetupJson(model, systemInstruction, Handle);
+
+        public void Reset() { Handle = null; LastTimeLeft = null; }
     }
 }

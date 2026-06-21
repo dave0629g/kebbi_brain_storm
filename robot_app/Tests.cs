@@ -73,6 +73,7 @@ namespace KebbiBrain
             T_TranslateRelay();
             T_Touch();
             T_StoryCircle();
+            T_LiveResume();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -537,6 +538,33 @@ namespace KebbiBrain
             Check("Game 跑 4 回合不卡死", game.RunTurnsAsync(4).Wait(3000));
             Check("故事 4 句、首句為小朋友", game.Core.Story.Count == 4 && game.Core.Story[0] == "阿明:有一隻貓");
             Check("第 3 句為凱比貢獻(LLM)", game.Core.Story[2].StartsWith("凱比:"));
+        }
+
+        // Gemini Live 斷線重連:setup 帶 sessionResumption、解析 newHandle/goAway.timeLeft、純重連狀態機。
+        private static void T_LiveResume()
+        {
+            Console.WriteLine("\n— T_LiveResume:Gemini Live 斷線重連 —");
+
+            // setup 啟用 resumption / resume 帶 handle
+            Check("setup 啟用 sessionResumption(空)", App.GeminiLiveProtocol.BuildSetupJson("m", "你是凱比。").Contains("\"sessionResumption\":{}"));
+            Check("resume setup 帶 handle", App.GeminiLiveProtocol.BuildResumeSetupJson("m", "你是凱比。", "H1").Contains("\"sessionResumption\":{\"handle\":\"H1\"}"));
+
+            // 解析 server 訊息
+            var u = App.GeminiLiveProtocol.TryParseServer("{\"sessionResumptionUpdate\":{\"newHandle\":\"abc123\",\"resumable\":true}}");
+            Check("解析 sessionResumptionUpdate.newHandle", u.ResumptionHandle == "abc123");
+            var g = App.GeminiLiveProtocol.TryParseServer("{\"goAway\":{\"timeLeft\":\"10s\"}}");
+            Check("解析 goAway + timeLeft", g.GoAway && g.GoAwayTimeLeft == "10s");
+
+            // 重連狀態機
+            var st = new App.LiveResumeState();
+            Check("初始無 handle→NextSetup 用全新 setup", !st.NextSetupJson("m", "s").Contains("\"handle\""));
+            st.Observe(u);
+            Check("Observe 存下 handle", st.Handle == "abc123");
+            st.Observe(g);
+            Check("Observe 記 goAway timeLeft", st.LastTimeLeft == "10s");
+            Check("goAway→ShouldReconnect", st.ShouldReconnect(g));
+            Check("有 handle→NextSetup 帶 handle 接續同 session", st.NextSetupJson("m", "s").Contains("\"handle\":\"abc123\""));
+            Check("一般訊息→不重連", !st.ShouldReconnect(App.GeminiLiveProtocol.TryParseServer("{\"serverContent\":{\"turnComplete\":true}}")));
         }
 
         private static void T_AngleToDir()
