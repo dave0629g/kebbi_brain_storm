@@ -79,6 +79,7 @@ namespace KebbiBrain
             T_LiveToken();
             T_VisionTalk();
             T_PresenceVision();
+            T_Presence();
 
             Console.WriteLine($"\n結果：{_pass} 通過 / {_fail} 失敗");
             Console.WriteLine("==============================");
@@ -713,6 +714,36 @@ namespace KebbiBrain
             Check("移動超門檻→Moved", w.Observe(moved) == App.PresenceEvent.Moved);
             Check("單幀消失→還沒確認(去抖,仍 Present)", w.Observe(absent) == App.PresenceEvent.StillPresent && w.Present);
             Check("連續第2幀消失→確認 Left", w.Observe(absent) == App.PresenceEvent.Left && !w.Present);
+        }
+
+        // PIR 存在感:迎接/降待命陪伴邏輯(SimPresenceSensor 注入事件)。
+        private static void T_Presence()
+        {
+            Console.WriteLine("\n— T_Presence:PIR 存在感(迎接/待命)—");
+            var sensor = new SimPresenceSensor();
+            int greet = 0, stand = 0;
+            var comp = new App.PresenceCompanion(sensor);   // confirmFrames=1(PIR 即時)
+            comp.OnArrived = () => greet++;
+            comp.OnLeft = () => stand++;
+
+            Check("初始:沒人", !comp.Present);
+            sensor.Emit(true);
+            Check("偵測到人→迎接1、Present", greet == 1 && comp.Present && comp.Greetings == 1);
+            sensor.Emit(true);
+            Check("續有人→不重複迎接", greet == 1);
+            sensor.Emit(false);
+            Check("人離開→待命1、!Present", stand == 1 && !comp.Present && comp.Standbys == 1);
+            sensor.Emit(true);
+            Check("再回來→再迎接(迎接2)", greet == 2 && comp.Present);
+
+            // 去抖版(confirmFrames=2):需連續 2 次才確認
+            var s2 = new SimPresenceSensor();
+            int g2 = 0;
+            var c2 = new App.PresenceCompanion(s2, confirmFrames: 2) { OnArrived = () => g2++ };
+            s2.Emit(true);
+            Check("去抖:第1次有人未確認", g2 == 0 && !c2.Present);
+            s2.Emit(true);
+            Check("去抖:第2次有人→確認迎接", g2 == 1 && c2.Present);
         }
 
         private static void T_AngleToDir()
